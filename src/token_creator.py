@@ -244,13 +244,14 @@ class TokenCreator:
                     'symbol': metadata.symbol,
                     'uri': metadata_uri,
                 },
-                'mint': str(mint_keypair.pubkey()),   # pubkey only
+                # PumpPortal requires the full 64-byte mint keypair as base58
+                # so it can co-sign the mint account creation server-side.
+                'mint': mint_keypair_b58,
                 'denominatedInSol': 'true',
                 'amount': initial_buy_sol,
                 'slippage': slippage_value,
                 'priorityFee': 0.0005,
                 'pool': 'pump',
-                'isMayhemMode': 'false'
             }
 
             # Request transaction from pump.fun API.
