@@ -30,4 +30,4 @@ pytz>=2023.3
 # Crypto
 cryptography>=41.0.7
 #nacl>=1.5.0
-nacl
+PyNaCl>=1.5.0
