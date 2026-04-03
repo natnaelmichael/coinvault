@@ -170,6 +170,81 @@ def _sparkline(prices: list, width: int = 80) -> RichText:
     return txt
 
 
+def _price_graph(prices: list, rows: int = 12, cols: int = 72, symbol: str = "") -> RichText:
+    """
+    Render a 2D ASCII price chart as multi-line RichText.
+
+    Each row represents a price band; each column a trade sample.
+    Uses half-block characters (▄ ▀) for sub-row resolution and
+    colours green above the session mid-price, red below.
+    """
+    LABEL_W = 14
+
+    txt = RichText(no_wrap=True)
+
+    if len(prices) < 2:
+        for i in range(rows + 1):
+            if i == rows // 2:
+                txt.append(" " * LABEL_W + " │" + "  ⠶  awaiting trade data…\n", style="dim")
+            else:
+                txt.append(" " * LABEL_W + " │\n", style="dim")
+        txt.append(" " * LABEL_W + " └" + "─" * cols + "\n", style="dim")
+        return txt
+
+    mn, mx = min(prices), max(prices)
+    rng = mx - mn if mx != mn else (mn * 0.001 or 1e-12)
+    mid = (mn + mx) / 2.0
+
+    sampled = list(prices)[-cols:]
+    n = len(sampled)
+    left_pad = max(0, cols - n)
+
+    def p2norm(p: float) -> float:
+        return (p - mn) / rng
+
+    norms = [p2norm(p) for p in sampled]
+
+    for r in range(rows):
+        row_top = 1.0 - r / rows
+        row_bot = 1.0 - (r + 1) / rows
+
+        price_at_top = mn + row_top * rng
+        price_at_bot = mn + row_bot * rng
+        price_at_mid_row = (price_at_top + price_at_bot) / 2.0
+
+        if r == 0:
+            lbl = _fmt_price(mx)
+        elif r == rows - 1:
+            lbl = _fmt_price(mn)
+        elif r == rows // 2:
+            lbl = _fmt_price(price_at_mid_row)
+        else:
+            lbl = ""
+
+        txt.append(lbl.rjust(LABEL_W), style="dim")
+        txt.append(" │", style="dim")
+
+        txt.append(" " * left_pad)
+
+        for ci, norm in enumerate(norms):
+            p = sampled[ci]
+            in_band = row_bot <= norm < row_top
+
+            if in_band:
+                col = "bold green" if p >= mid else "bold red"
+                frac = (norm - row_bot) / (row_top - row_bot)
+                char = "▀" if frac >= 0.5 else "▄"
+                txt.append(char, style=col)
+            else:
+                txt.append(" ")
+
+        txt.append("\n")
+
+    txt.append(" " * LABEL_W + " └" + "─" * (left_pad + n) + "\n", style="dim")
+
+    return txt
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Modals
 # ─────────────────────────────────────────────────────────────────────────────
@@ -834,12 +909,18 @@ class MonitorPane(Container):
     }
     #mon-price  { height: 2; text-style: bold; padding-top: 1; }
     #mon-stats  { height: 2; color: $text-muted; }
-    #mon-chart  {
-        height: 5; background: $background;
-        border-bottom: solid $border; padding: 0 2;
+    #mon-chart-box {
+        height: 18; background: $background;
+        border: solid cyan;
+        margin: 0 1;
     }
-    #mon-chart-line { height: 2; }
-    #mon-chart-axis { height: 1; color: $text-muted; }
+    #mon-chart-title {
+        height: 1; padding: 0 1;
+        background: $surface;
+        color: $text;
+        border-bottom: solid $border;
+    }
+    #mon-chart-graph { height: auto; padding: 0 1; }
     #mon-trades { height: 1fr; }
     #mon-trades DataTable { height: 1fr; border: none; }
     #mon-pick-row {
@@ -866,9 +947,12 @@ class MonitorPane(Container):
         with Container(id="mon-header"):
             yield Static("[dim]—[/dim]", id="mon-price")
             yield Static("[dim]awaiting feed…[/dim]", id="mon-stats")
-        with Container(id="mon-chart"):
-            yield Static("", id="mon-chart-line")
-            yield Static("", id="mon-chart-axis")
+        with Container(id="mon-chart-box"):
+            yield Static(
+                "[bold cyan]Price Chart[/bold cyan]  [dim]rolling 72 trades · auto-refresh[/dim]",
+                id="mon-chart-title",
+            )
+            yield Static("", id="mon-chart-graph")
         with Container(id="mon-trades"):
             tbl = DataTable(id="mon-table", cursor_type="none")
             yield tbl
@@ -882,6 +966,12 @@ class MonitorPane(Container):
     def on_mount(self) -> None:
         tbl = self.query_one("#mon-table", DataTable)
         tbl.add_columns("Time", "Side", "SOL", "Tokens", "Price (SOL)", "Wallet", "Sig")
+        self.set_interval(1.0, self._tick_refresh)
+
+    def _tick_refresh(self) -> None:
+        """Called every second to keep the stats display live (e.g. 'last trade X s ago')."""
+        if self._state.get("price") is not None:
+            self._update_ui(graph=False)
 
     def on_show(self) -> None:
         if self._token_mint:
@@ -1016,7 +1106,7 @@ class MonitorPane(Container):
             "time": datetime.now().strftime("%H:%M:%S"),
         })
 
-    def _update_ui(self) -> None:
+    def _update_ui(self, graph: bool = True) -> None:
         st    = self._state
         price = st["price"]
         open_ = st["price_open"]
@@ -1055,13 +1145,17 @@ class MonitorPane(Container):
             f"B/S: [yellow]{bsr}[/yellow]{last_s}"
         )
 
-        # Sparkline
-        pl = list(self._prices)
-        self.query_one("#mon-chart-line", Static).update(_sparkline(pl))
-        if len(pl) >= 2:
-            mn, mx = min(pl), max(pl)
-            self.query_one("#mon-chart-axis", Static).update(
-                f"[dim]{_fmt_price(mn)}[/dim]  ···  [dim]{_fmt_price(mx)}[/dim]"
+        # 2-D price chart (redrawn on every new trade; skipped on 1s tick)
+        if graph:
+            pl = list(self._prices)
+            sym_label = f"[bold white]{self._token_sym}[/bold white]  " if self._token_sym else ""
+            n_trades = len(pl)
+            self.query_one("#mon-chart-title", Static).update(
+                f"[bold cyan]Price Chart[/bold cyan]  {sym_label}"
+                f"[dim]rolling 72 trades  ·  {n_trades} pts  ·  auto-refresh[/dim]"
+            )
+            self.query_one("#mon-chart-graph", Static).update(
+                _price_graph(pl, rows=12, cols=72, symbol=self._token_sym)
             )
 
         # Latest trade row (prepend to table)
