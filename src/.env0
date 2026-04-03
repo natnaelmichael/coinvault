@@ -1,0 +1,57 @@
+# Solana RPC Configuration
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+SOLANA_NETWORK=mainnet-beta  # mainnet-beta or devnet
+
+# Safety
+DRY_RUN_MODE=true  # Set to false for live trading
+REQUIRE_CONFIRMATION=true  
+
+
+
+# Wallet Configuration
+# Wallet 1: Address: 6XBWSuqRRv1fk2jSxVNiviSk8pwiUaoL1Lz1ThWPbtoz
+#DEV_WALLET_PRIVATE_KEY=3xD2oJ8WcJwqtZahLKQogBAJLVtXNU3T5HM9PMyFgjfwSBhAUYhREq4JHuf5QZCLfU8qpB9HwKr63mYpse1B58Pi
+
+#Wallet 1: Address: FAfymLdh4mN1ypYD9rAf9g7dJnMpPGLyVdHKmSn16mg5
+DEV_WALLET_PRIVATE_KEY=36ufYVJiXP1EirAAG12XKhVtxNm6jQu9Rvv5sRmcZHkbp8xt4jp7aQySxav1zk58ydZiaqafS9R45VR8CES2SVJH
+# Fund Wallets (add as many as needed, comma-separated)
+#Wallet 2: Address: BANP1fBbsjNnBmDjDyd5cStiCUAsBHrHmte8XC1BGMFb
+#Wallet 3: Address: 5myFfY5Bhg4en6cHLwww4eySuXfGFtWnD1y89vuLqot9
+#Wallet 4: Address: 6FLZ9p6tQBmb2TvpHUVtJMKy5kiD6ewpJa2hanT3tnDZ
+#Wallet 5: Address: 3EwJw8SXhc6atVNis9Gb7KYZWV7FPtmGTSnKB5ku5nFm
+#Wallet 6: Address: H58pPr4DfHrPJvbpv8K2D8qrqkx6dXP2UWb7WiGRYbEo
+
+FUND_WALLET_PRIVATE_KEYS=QGc5YRxwJypeqEGKzWaz52TLcyQxYXCxBzMLAWK6ySEP3D8wrMQdgLwqrphNPExz716u99guB7uMDquU
+xqmiSz1,5jMx36ZLwMPboqotSLKX3vjFRVdDrKEYeLR428rZordtGP7G6wVidYV7Vqg97qqm94iaMVQ1rwuL3CCJ
+ik2drwhF,4baW1SzKNLBpE6q2upCDhSp8oUKZZ6FUD2bQBChhoGgoMgusjN2HUav8vMdJLbTPqUyztQ5r8Rw68ca7
+yq49Gbk7,5WWBYpDhZQHAHjKnRBBBtMCRvKovKWbE3cgDB2KmXZrb4UfpaMopjYHm9Gq3j1Q2JR42GS33RoiNh2Zf
+h2KTeeFd,5imEf9QhGie7ph4vch5H7CFozp7GCdjjiYWFySma5mzPWQh3VS5nKpVKEG7xjKsT4UJ6unyq4ptiG4L5
+kfnLpJdm
+
+# Trading Configuration
+DEFAULT_SLIPPAGE_BPS=500  # 5% = 500 basis points
+MAX_BUY_AMOUNT_SOL=1.0
+MIN_BUY_AMOUNT_SOL=0.01
+
+# Automation Settings
+AUTO_SELL_ENABLED=false
+AUTO_SELL_PROFIT_MULTIPLIER=2.0  # Sell when 2x profit
+AUTO_SELL_MCAP_THRESHOLD=100000  # Sell when mcap reaches this
+AUTO_WITHDRAW_ENABLED=false
+
+# Monitoring & Alerts
+PRICE_ALERT_THRESHOLD_PERCENT=10  # Alert on 10% price change
+VOLUME_ALERT_THRESHOLD=1000  # Alert when volume exceeds this
+ENABLE_SOUND_ALERTS=true
+ENABLE_DESKTOP_NOTIFICATIONS=true
+
+# Pump.fun Specific
+PUMPFUN_PROGRAM_ID=6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P
+PUMPFUN_GLOBAL_ACCOUNT=4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf
+PUMPFUN_FEE_RECIPIENT=CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM
+PUMPFUN_EVENT_AUTHORITY=Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1
+PUMPFUN_MINT_AUTHORITY=TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM
+
+# Logging
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
+LOG_TO_FILE=true
