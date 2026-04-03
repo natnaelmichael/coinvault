@@ -146,51 +146,19 @@ async def interactive_menu():
 
 def _load_created_tokens() -> list:
     """
-    Load all known tokens from the registry.
-
-    Checks two locations and merges the results, deduplicating by mint address:
-      1. created_tokens/*.json  — one file per token (preferred going-forward)
-      2. data/created_tokens.json — legacy flat list written by create_token_menu
-
-    Each entry is expected to have at least a 'mint' key.  Entries missing a
-    mint are silently skipped so a half-written file can't crash the picker.
+    Load all tokens from data/created_tokens.json.
+    Returns a list of dicts; each must have at least a 'mint' key.
+    Entries missing a mint are skipped silently.
     """
     import json
-    from pathlib import Path
 
-    seen: set = set()
-    tokens: list = []
-
-    def _add(entry: dict):
-        mint = entry.get("mint", "").strip()
-        if mint and mint not in seen:
-            seen.add(mint)
-            tokens.append(entry)
-
-    # 1. Individual files in created_tokens/
-    ct_dir = Path("created_tokens")
-    if ct_dir.is_dir():
-        for f in sorted(ct_dir.glob("*.json")):
-            try:
-                data = json.loads(f.read_text())
-                if isinstance(data, list):
-                    for entry in data:
-                        _add(entry)
-                elif isinstance(data, dict):
-                    _add(data)
-            except Exception:
-                pass  # Corrupt file — skip silently
-
-    # 2. Legacy flat-list file
-    legacy = _CREATED_TOKENS_PATH
-    if legacy.exists():
-        try:
-            for entry in json.loads(legacy.read_text()):
-                _add(entry)
-        except Exception:
-            pass
-
-    return tokens
+    try:
+        raw = json.loads(_CREATED_TOKENS_PATH.read_text())
+        if not isinstance(raw, list):
+            return []
+        return [e for e in raw if isinstance(e, dict) and e.get("mint", "").strip()]
+    except Exception:
+        return []
 
 
 async def _select_token_from_registry(action_label: str = "action") -> "str | None":
@@ -268,7 +236,7 @@ async def _select_token_from_registry(action_label: str = "action") -> "str | No
 
     else:
         console.print("[yellow]No tokens found in registry.[/yellow]")
-        console.print("[dim]  Checked: created_tokens/*.json  and  data/created_tokens.json[/dim]")
+        console.print("[dim]  Source: data/created_tokens.json[/dim]")
         console.print()
         console.print("  [bold]m[/bold]  Enter mint address manually")
         console.print("  [bold]0[/bold]  Cancel")
