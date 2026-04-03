@@ -5,6 +5,7 @@ Command-line interface for the pump.fun bot
 
 import asyncio
 import click
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich import print as rprint
@@ -18,6 +19,10 @@ from .notifications import notification_manager
 from .token_creator import get_token_creator, TokenMetadata
 from .buyer import get_token_buyer
 from .seller import get_token_seller
+
+# Absolute project root so file paths resolve correctly regardless of cwd.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_CREATED_TOKENS_PATH = _PROJECT_ROOT / "data" / "created_tokens.json"
 
 
 console = Console()
@@ -177,7 +182,7 @@ def _load_created_tokens() -> list:
                 pass  # Corrupt file — skip silently
 
     # 2. Legacy flat-list file
-    legacy = Path("data/created_tokens.json")
+    legacy = _CREATED_TOKENS_PATH
     if legacy.exists():
         try:
             for entry in json.loads(legacy.read_text()):
@@ -456,9 +461,8 @@ async def create_token_menu():
 
         # Save token info
         import json
-        from pathlib import Path
-        token_file = Path("data/created_tokens.json")
-        token_file.parent.mkdir(exist_ok=True)
+        token_file = _CREATED_TOKENS_PATH
+        token_file.parent.mkdir(parents=True, exist_ok=True)
         tokens = []
         if token_file.exists():
             tokens = json.loads(token_file.read_text())
@@ -1247,8 +1251,8 @@ async def _launch_preloaded_token():
         preload_file.write_text(json.dumps(preloaded_tokens, indent=2))
         
         # Save to created tokens as well
-        token_file = Path("data/created_tokens.json")
-        token_file.parent.mkdir(exist_ok=True)
+        token_file = _CREATED_TOKENS_PATH
+        token_file.parent.mkdir(parents=True, exist_ok=True)
         created_tokens = []
         if token_file.exists():
             created_tokens = json.loads(token_file.read_text())
