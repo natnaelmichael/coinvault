@@ -6,8 +6,6 @@ import requests
 import json
 import httpx
 import asyncio
-import base58
-
 from typing import Optional, Dict, Any
 from pathlib import Path
 from solders.keypair import Keypair
@@ -206,11 +204,11 @@ class TokenCreator:
             # Generate new keypair for the token mint
             mint_keypair = Keypair()
             mint_address = str(mint_keypair.pubkey())
-            # PumpPortal's 'create' action requires the full 64-byte keypair encoded as
-            # base58 in the 'mint' field — it uses the secret key server-side to derive
-            # and register the mint address. The keypair is ALSO used below to co-sign
-            # the returned VersionedTransaction (mint keypair must be first signer).
-            mint_keypair_b58 = base58.b58encode(bytes(mint_keypair)).decode("utf-8")
+            # trade-local: PumpPortal only needs the mint PUBLIC KEY (44-char base58)
+            # to build the unsigned transaction.  The full keypair stays in memory so
+            # we can co-sign the returned VersionedTransaction ourselves (first signer).
+            # Sending the full 64-byte keypair (88-char b58) causes a 400 Bad Request
+            # because PumpPortal tries to deserialize it as a Pubkey and fails.
 
             logger.info(f"Token mint address: {mint_address}")
 
@@ -244,9 +242,9 @@ class TokenCreator:
                     'symbol': metadata.symbol,
                     'uri': metadata_uri,
                 },
-                # PumpPortal requires the full 64-byte mint keypair as base58
-                # so it can co-sign the mint account creation server-side.
-                'mint': mint_keypair_b58,
+                # trade-local requires only the mint public key (base58, 44 chars).
+                # The full keypair is used below to sign the returned transaction.
+                'mint': mint_address,
                 'denominatedInSol': 'true',
                 'amount': initial_buy_sol,
                 'slippage': slippage_value,
@@ -254,10 +252,9 @@ class TokenCreator:
                 'pool': 'pump',
             }
 
-            # Request transaction from pump.fun API.
-            # IMPORTANT: PumpPortal's /api/trade-local expects form-encoded data for the
-            # PumpPortal /api/trade-local expects a JSON body with Content-Type: application/json
-            logger.debug(f"Sending create payload: {create_data}")
+            # Request transaction from PumpPortal.
+            # trade-local expects JSON body; returns a serialised VersionedTransaction.
+            logger.debug(f"Sending create payload (mint={mint_address[:8]}… len={len(mint_address)}): {create_data}")
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     self.CREATE_TX_URL,
@@ -279,11 +276,8 @@ class TokenCreator:
                     pass
                 return None
 
-            # Parse transaction.
-            # Mint keypair MUST be first signer per PumpPortal docs.
-            #tx_data = response.content
-            '''unsigned_tx = VersionedTransaction.from_bytes(response.content)
-            signed_tx = VersionedTransaction(unsigned_tx.message, [mint_keypair, creator_wallet.keypair])'''
+            # Parse the returned unsigned transaction, inject a fresh blockhash,
+            # then sign: mint keypair MUST be first signer per PumpPortal docs.
             unsigned_tx = VersionedTransaction.from_bytes(response.content)
             blockhash_resp = await self.rpc_client.get_latest_blockhash()
             fresh_blockhash = blockhash_resp.value.blockhash
@@ -299,15 +293,8 @@ class TokenCreator:
 
             signed_tx = VersionedTransaction(new_msg, [mint_keypair, creator_wallet.keypair])
 
-            # Send transaction
+            # Broadcast the signed transaction
             logger.info("Sending token creation transaction...")
-            #
-            #
-            #
-            #Errors with launching token are likely past this line.
-            #
-            #
-            #
             signature = await self.rpc_client.send_raw_transaction(
                 bytes(signed_tx),
                 opts=TxOpts(skip_preflight=True, max_retries=3)
