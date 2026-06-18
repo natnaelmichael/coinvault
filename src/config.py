@@ -126,6 +126,21 @@ class Config:
         self.pumpfun_event_authority = os.getenv("PUMPFUN_EVENT_AUTHORITY", "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1")
         self.pumpfun_mint_authority = os.getenv("PUMPFUN_MINT_AUTHORITY", "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM")
 
+        # IPFS upload mode
+        # "pumpfun" (default) — uses pump.fun's internal /api/ipfs endpoint
+        # "local"             — uses a locally-running IPFS daemon (ipfs daemon)
+        #                       with 2-stage pin+DHT and public gateway verification
+        self.ipfs_mode = os.getenv("IPFS_MODE", "pumpfun").lower()
+        self.ipfs_local_api = os.getenv("IPFS_LOCAL_API", "http://127.0.0.1:5001")
+
+        # Stage 2 gateway verification settings (local mode only)
+        # Set IPFS_GATEWAY_VERIFY=false to skip the gateway check (not recommended)
+        self.ipfs_gateway_verify = os.getenv("IPFS_GATEWAY_VERIFY", "true").lower() == "true"
+        # How many seconds to wait for the content to appear on the public gateway
+        self.ipfs_gateway_timeout = int(os.getenv("IPFS_GATEWAY_TIMEOUT", "90"))
+        # How often to re-check (seconds between polls)
+        self.ipfs_gateway_poll_interval = float(os.getenv("IPFS_GATEWAY_POLL_INTERVAL", "6"))
+
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
         self.log_to_file = os.getenv("LOG_TO_FILE", "true").lower() == "true"
@@ -173,6 +188,10 @@ class Config:
 ║ Auto-Sell: {'Enabled' if self.auto_sell_enabled else 'Disabled':47} ║
 ║ Auto-Withdraw: {'Enabled' if self.auto_withdraw_enabled else 'Disabled':43} ║
 ║ Profit Target: {self.auto_sell_profit_multiplier}x                                    ║
+╠══════════════════════════════════════════════════════════════╣
+║ IPFS                                                         ║
+║ Mode: {('local (daemon @ ' + self.ipfs_local_api + ')') if self.ipfs_mode == 'local' else 'pumpfun (pump.fun /api/ipfs)':52} ║
+║ Gateway Verify: {'Enabled (timeout ' + str(self.ipfs_gateway_timeout) + 's)' if self.ipfs_gateway_verify else 'Disabled':42} ║
 ╠══════════════════════════════════════════════════════════════╣
 ║ ALERTS                                                       ║
 ║ Desktop Notifications: {'Enabled' if self.enable_desktop_notifications else 'Disabled':35} ║

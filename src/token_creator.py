@@ -1,12 +1,20 @@
 """
 Token Creator for pump.fun
-Handles token creation, metadata upload, and deployment
+Handles token creation, metadata upload, and deployment.
+
+IPFS upload supports two modes (set IPFS_MODE in .env):
+  pumpfun  (default) — uploads via pump.fun's internal /api/ipfs endpoint
+  local             — uploads via a locally-running IPFS daemon (ipfs daemon)
+                      with a 2-stage reliability check:
+                        Stage 1: pin locally + announce to the DHT
+                        Stage 2: poll a public gateway until the content is
+                                 reachable, then (and only then) send the
+                                 on-chain transaction.
 """
 
-import requests
 import json
-import httpx
 import asyncio
+import httpx
 from typing import Optional, Dict, Any
 from pathlib import Path
 from solders.keypair import Keypair
@@ -42,106 +50,93 @@ class TokenMetadata:
         self.website = website
 
     def to_form_data(self) -> Dict[str, Any]:
-        """Convert to form data for IPFS upload"""
+        """Convert to form data for pump.fun IPFS upload"""
         data = {
             "name": self.name,
             "symbol": self.symbol,
             "description": self.description,
-            # twitter' : self.twitter,
-            #'telegram' : self.telegram,
-            #'website' : self.website,
             "showName": "true",
         }
-
         if self.twitter:
             data["twitter"] = self.twitter
         if self.telegram:
             data["telegram"] = self.telegram
         if self.website:
             data["website"] = self.website
-
         return data
 
 
 class TokenCreator:
     """Handles token creation on pump.fun"""
 
-    # pump.fun API endpoints
-    # IPFS metadata upload goes directly to pump.fun (pumpportal has no /api/ipfs).
-    # The trade/create endpoint lives on pumpportal.fun.
     IPFS_UPLOAD_URL = "https://pump.fun/api/ipfs"
-    CREATE_TX_URL = "https://pumpportal.fun/api/trade-local"
+    CREATE_TX_URL   = "https://pumpportal.fun/api/trade-local"
 
-    # pump.fun's /api/ipfs endpoint validates that requests look like they come
-    # from a browser. Without a matching User-Agent + Origin it returns 404.
     IPFS_HEADERS = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         ),
-        "Origin": "https://pump.fun",
+        "Origin":  "https://pump.fun",
         "Referer": "https://pump.fun/",
     }
 
     def __init__(self, rpc_client: AsyncClient):
         self.rpc_client = rpc_client
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public entry-point — routes to the correct backend
+    # ─────────────────────────────────────────────────────────────────────────
+
     async def upload_metadata_to_ipfs(
         self, metadata: TokenMetadata
     ) -> Optional[Dict[str, str]]:
         """
-        Upload token metadata and image to IPFS
+        Upload token image + metadata to IPFS.
 
-        Args:
-            metadata: Token metadata object
+        Routes to the local IPFS daemon when IPFS_MODE=local, otherwise uses
+        the pump.fun /api/ipfs endpoint (default).
 
         Returns:
-            Dict with metadataUri or None if failed
+            {"metadataUri": "ipfs://..."} on success, None on failure.
         """
+        logger.info(
+            f"Uploading metadata for {metadata.name} ({metadata.symbol}) "
+            f"[mode: {config.ipfs_mode}]..."
+        )
+
+        if config.dry_run_mode:
+            logger.info("[DRY RUN] Would upload metadata to IPFS")
+            return {"metadataUri": "ipfs://QmDRYRUNMODE123456789/metadata.json"}
+
+        if config.ipfs_mode == "local":
+            return await self._upload_metadata_local_ipfs(metadata)
+        else:
+            return await self._upload_metadata_pumpfun(metadata)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Backend A — pump.fun /api/ipfs  (original behaviour)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _upload_metadata_pumpfun(
+        self, metadata: TokenMetadata
+    ) -> Optional[Dict[str, str]]:
+        """Upload via pump.fun's internal Next.js IPFS endpoint."""
         try:
-            logger.info(
-                f"Uploading metadata for {metadata.name} ({metadata.symbol}) to IPFS..."
-            )
-
-            if config.dry_run_mode:
-                logger.info("[DRY RUN] Would upload metadata to IPFS")
-                return {"metadataUri": "ipfs://QmDRYRUNMODE123456789/metadata.json"}
-
-            # Prepare form data
-            form_data = metadata.to_form_data()
-
-            # Prepare image file
-            files = None
-            if metadata.image_path:
-                image_path = Path(metadata.image_path).expanduser().resolve()
-                logger.debug(
-                    f"Resolved image path: {image_path} (exists: {image_path.exists()})"
-                )
-                if image_path.exists():
-                    with open(image_path, "rb") as f:
-                        file_content = f.read()
-                    file_name = image_path.name
-                    mime_type = self._get_mime_type(file_name)
-                    files = {"file": (file_name, file_content, mime_type)}
-                    logger.info(
-                        f"Image loaded: {file_name} ({len(file_content):,} bytes)"
-                    )
-                else:
-                    logger.error(f"Image file not found: {image_path}")
-                    logger.error(
-                        "Token creation requires an image — please check the path and try again"
-                    )
-                    return None
-            else:
-                logger.error(
-                    "No image path provided — pump.fun requires an image for token creation"
-                )
+            image_path = Path(metadata.image_path).expanduser().resolve()
+            if not image_path.exists():
+                logger.error(f"Image file not found: {image_path}")
                 return None
 
-            # Upload to IPFS.
-            # pump.fun/api/ipfs requires browser-like headers (User-Agent, Origin,
-            # Referer) — requests without them get a 404 from the Next.js server.
+            file_content = image_path.read_bytes()
+            file_name    = image_path.name
+            mime_type    = self._get_mime_type(file_name)
+            logger.info(f"Image loaded: {file_name} ({len(file_content):,} bytes)")
+
+            form_data = metadata.to_form_data()
+            files     = {"file": (file_name, file_content, mime_type)}
+
             async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.post(
                     self.IPFS_UPLOAD_URL,
@@ -152,34 +147,260 @@ class TokenCreator:
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(
-                    f"✓ Metadata uploaded to IPFS: {result.get('metadataUri', 'Unknown')}"
-                )
+                logger.info(f"✓ pump.fun IPFS upload OK: {result.get('metadataUri')}")
                 return result
-            else:
-                try:
-                    error_detail = response.json()
-                except Exception:
-                    error_detail = response.text
-                logger.error(f"IPFS upload failed: {response.status_code}")
-                logger.error(f"IPFS error detail: {error_detail}")
-                return None
 
-        except Exception as e:
-            logger.error(f"Failed to upload metadata to IPFS: {e}")
+            try:
+                err = response.json()
+            except Exception:
+                err = response.text
+            logger.error(f"pump.fun IPFS upload failed {response.status_code}: {err}")
             return None
 
-    def _get_mime_type(self, filename: str) -> str:
-        """Get MIME type from filename"""
-        ext = Path(filename).suffix.lower()
-        mime_types = {
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".png": "image/png",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
+        except Exception as e:
+            logger.error(f"pump.fun IPFS upload exception: {e}")
+            return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Backend B — local IPFS daemon  (2-stage: pin+DHT then gateway verify)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _upload_metadata_local_ipfs(
+        self, metadata: TokenMetadata
+    ) -> Optional[Dict[str, str]]:
+        """
+        Upload image + metadata JSON to a locally-running IPFS daemon.
+
+        Stage 1 — pin + DHT announce:
+            After uploading each file the CID is pinned to the local node so
+            it survives garbage collection, then a background task fires
+            `routing/provide` to tell the DHT "I have this content".
+
+        Stage 2 — gateway verification:
+            Before proceeding the code polls https://ipfs.io/ipfs/<CID> until
+            the content is reachable from the public internet (or times out).
+            If the gateway check fails the method returns None, which causes
+            create_token() to abort — no on-chain transaction is ever sent.
+        """
+        api = config.ipfs_local_api
+
+        # ── 0. Sanity-check: is the daemon actually running? ─────────────────
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(f"{api}/api/v0/id")
+        except Exception:
+            logger.error(f"[LOCAL IPFS] Daemon not reachable at {api}")
+            logger.error("  → Start it with:  ipfs daemon")
+            return None
+
+        # ── 1. Upload image ───────────────────────────────────────────────────
+        image_path = Path(metadata.image_path).expanduser().resolve()
+        if not image_path.exists():
+            logger.error(f"[LOCAL IPFS] Image not found: {image_path}")
+            return None
+
+        file_bytes = image_path.read_bytes()
+        mime_type  = self._get_mime_type(image_path.name)
+        logger.info(f"[LOCAL IPFS] Uploading image ({len(file_bytes):,} bytes)...")
+
+        image_cid = await self._ipfs_add(api, file_bytes, image_path.name, mime_type)
+        if not image_cid:
+            return None
+        logger.info(f"  ✓ Image CID: {image_cid}")
+
+        # Stage 1 — pin + DHT announce image
+        await self._ipfs_pin(api, image_cid, "image")
+        asyncio.create_task(self._ipfs_dht_provide(api, image_cid, "image"))
+
+        # Stage 2 — gateway verification for image
+        if config.ipfs_gateway_verify:
+            logger.info("[LOCAL IPFS] Stage 2 — verifying image on public gateway...")
+            ok = await self._verify_on_gateway(image_cid, label="image")
+            if not ok:
+                logger.error(
+                    "[LOCAL IPFS] ✗ Image not reachable on public gateway within "
+                    f"{config.ipfs_gateway_timeout}s — transaction aborted."
+                )
+                return None
+
+        # ── 2. Build and upload metadata JSON ────────────────────────────────
+        metadata_doc: Dict[str, Any] = {
+            "name":        metadata.name,
+            "symbol":      metadata.symbol,
+            "description": metadata.description,
+            "image":       f"https://ipfs.io/ipfs/{image_cid}",
+            "showName":    True,
         }
-        return mime_types.get(ext, "image/png")
+        if metadata.twitter:
+            metadata_doc["twitter"]  = metadata.twitter
+        if metadata.telegram:
+            metadata_doc["telegram"] = metadata.telegram
+        if metadata.website:
+            metadata_doc["website"]  = metadata.website
+
+        meta_bytes = json.dumps(metadata_doc, indent=2).encode()
+        logger.info(f"[LOCAL IPFS] Uploading metadata JSON ({len(meta_bytes)} bytes)...")
+
+        meta_cid = await self._ipfs_add(api, meta_bytes, "metadata.json", "application/json")
+        if not meta_cid:
+            return None
+        logger.info(f"  ✓ Metadata CID: {meta_cid}")
+
+        # Stage 1 — pin + DHT announce metadata
+        await self._ipfs_pin(api, meta_cid, "metadata")
+        asyncio.create_task(self._ipfs_dht_provide(api, meta_cid, "metadata"))
+
+        # Stage 2 — gateway verification for metadata
+        if config.ipfs_gateway_verify:
+            logger.info("[LOCAL IPFS] Stage 2 — verifying metadata on public gateway...")
+            ok = await self._verify_on_gateway(meta_cid, label="metadata")
+            if not ok:
+                logger.error(
+                    "[LOCAL IPFS] ✗ Metadata not reachable on public gateway within "
+                    f"{config.ipfs_gateway_timeout}s — transaction aborted."
+                )
+                return None
+
+        metadata_uri = f"ipfs://{meta_cid}"
+        logger.info(f"✓ Local IPFS upload complete — URI: {metadata_uri}")
+        return {"metadataUri": metadata_uri}
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Local IPFS helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _ipfs_add(
+        self, api: str, data: bytes, filename: str, mime_type: str
+    ) -> Optional[str]:
+        """
+        POST data to /api/v0/add and return the CID string.
+        The daemon returns one JSON object per file; we read the last one.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{api}/api/v0/add",
+                    files={"file": (filename, data, mime_type)},
+                )
+            resp.raise_for_status()
+            # The response may contain multiple newline-delimited JSON objects
+            last_line = [l for l in resp.text.strip().splitlines() if l.strip()][-1]
+            result = json.loads(last_line)
+            return result["Hash"]
+        except Exception as e:
+            logger.error(f"[LOCAL IPFS] /api/v0/add failed for {filename}: {e}")
+            return None
+
+    async def _ipfs_pin(self, api: str, cid: str, label: str = "") -> None:
+        """Pin a CID on the local node (Stage 1a)."""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{api}/api/v0/pin/add?arg={cid}")
+            resp.raise_for_status()
+            logger.info(f"  ✓ Pinned {label} ({cid[:16]}...)")
+        except Exception as e:
+            logger.warning(f"  ⚠ Pin warning for {label} (non-fatal): {e}")
+
+    async def _ipfs_dht_provide(self, api: str, cid: str, label: str = "") -> None:
+        """
+        Announce the CID to the DHT so peers know this node has it (Stage 1b).
+
+        Runs as a fire-and-forget background task.  Uses routing/provide
+        (Kubo ≥ 0.14); falls back to the legacy dht/provide endpoint.
+        The endpoint streams NDJSON progress lines until complete — we read
+        the response but don't block the main flow waiting for it.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                try:
+                    resp = await client.post(
+                        f"{api}/api/v0/routing/provide?arg={cid}&verbose=false"
+                    )
+                    resp.raise_for_status()
+                except Exception:
+                    resp = await client.post(
+                        f"{api}/api/v0/dht/provide?arg={cid}&verbose=false"
+                    )
+                    resp.raise_for_status()
+            logger.info(f"  ✓ DHT provide complete for {label} ({cid[:16]}...)")
+        except Exception as e:
+            logger.warning(f"  ⚠ DHT provide warning for {label} (non-fatal): {e}")
+
+    async def _verify_on_gateway(
+        self, cid: str, label: str = ""
+    ) -> bool:
+        """
+        Stage 2: Poll https://ipfs.io/ipfs/<CID> until the content is
+        reachable from the public internet, or until the configured timeout.
+
+        Returns True if the gateway responds with HTTP < 400, False on timeout.
+        """
+        gateway_url = f"https://ipfs.io/ipfs/{cid}"
+        timeout  = config.ipfs_gateway_timeout
+        interval = config.ipfs_gateway_poll_interval
+        elapsed  = 0.0
+        attempt  = 0
+
+        logger.info(
+            f"  ⏳ Polling gateway for {label or cid[:16]} "
+            f"(timeout: {timeout}s, every {interval}s)..."
+        )
+
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            while elapsed < timeout:
+                attempt += 1
+                try:
+                    resp = await client.head(gateway_url)
+                    if resp.status_code < 400:
+                        logger.info(
+                            f"  ✓ {label} live on gateway after {elapsed:.0f}s "
+                            f"(HTTP {resp.status_code}) — {gateway_url}"
+                        )
+                        return True
+                    logger.info(
+                        f"  [{attempt}] HTTP {resp.status_code} — "
+                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                    )
+                except httpx.TimeoutException:
+                    logger.info(
+                        f"  [{attempt}] Gateway timeout — "
+                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                    )
+                except Exception as e:
+                    logger.info(
+                        f"  [{attempt}] {e} — "
+                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                    )
+
+                wait = min(interval, timeout - elapsed)
+                if wait <= 0:
+                    break
+                await asyncio.sleep(wait)
+                elapsed += wait
+
+        logger.error(
+            f"  ✗ Gateway verification timed out after {timeout}s for "
+            f"{label} — {gateway_url}"
+        )
+        return False
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Shared helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _get_mime_type(self, filename: str) -> str:
+        ext = Path(filename).suffix.lower()
+        return {
+            ".jpg":  "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png":  "image/png",
+            ".gif":  "image/gif",
+            ".webp": "image/webp",
+        }.get(ext, "image/png")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Token creation (unchanged logic — just calls upload_metadata_to_ipfs)
+    # ─────────────────────────────────────────────────────────────────────────
 
     async def create_token(
         self,
@@ -189,37 +410,23 @@ class TokenCreator:
         slippage_bps: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Create a token on pump.fun
+        Create a token on pump.fun.
 
-        Args:
-            creator_wallet: Wallet to create token with (dev wallet)
-            metadata: Token metadata
-            initial_buy_sol: Amount of SOL for initial buy (optional)
-            slippage_bps: Slippage in basis points (optional, uses default if None)
-
-        Returns:
-            Dict with token info or None if failed
+        The IPFS upload (and, in local mode, the 2-stage gateway verification)
+        must succeed before any on-chain transaction is attempted.
         """
         try:
             logger.info(f"Creating token: {metadata.name} ({metadata.symbol})")
 
-            # Upload metadata to IPFS
             ipfs_response = await self.upload_metadata_to_ipfs(metadata)
             if not ipfs_response:
-                logger.error("Failed to upload metadata, aborting token creation")
+                logger.error("IPFS upload/verification failed — transaction aborted.")
                 return None
 
             metadata_uri = ipfs_response["metadataUri"]
 
-            # Generate new keypair for the token mint
-            mint_keypair = Keypair()
-            mint_address = str(mint_keypair.pubkey())
-            # trade-local: PumpPortal only needs the mint PUBLIC KEY (44-char base58)
-            # to build the unsigned transaction.  The full keypair stays in memory so
-            # we can co-sign the returned VersionedTransaction ourselves (first signer).
-            # Sending the full 64-byte keypair (88-char b58) causes a 400 Bad Request
-            # because PumpPortal tries to deserialize it as a Pubkey and fails.
-
+            mint_keypair  = Keypair()
+            mint_address  = str(mint_keypair.pubkey())
             logger.info(f"Token mint address: {mint_address}")
 
             if config.dry_run_mode:
@@ -228,20 +435,16 @@ class TokenCreator:
                 logger.info(f"[DRY RUN] Metadata URI: {metadata_uri}")
                 if initial_buy_sol > 0:
                     logger.info(f"[DRY RUN] Initial buy: {initial_buy_sol} SOL")
-
                 return {
-                    "success": True,
-                    "signature": "DRY_RUN_SIGNATURE_" + mint_address[:8],
-                    "mint": mint_address,
+                    "success":     True,
+                    "signature":   "DRY_RUN_SIGNATURE_" + mint_address[:8],
+                    "mint":        mint_address,
                     "metadataUri": metadata_uri,
-                    "creator": str(creator_wallet.public_key),
-                    "initialBuy": initial_buy_sol,
+                    "creator":     str(creator_wallet.public_key),
+                    "initialBuy":  initial_buy_sol,
                 }
 
-            # Prepare create transaction request.
-            # NOTE: PumpPortal expects slippage as a plain percent (e.g. 5), not bps (e.g. 500).
-            slippage_pct = (slippage_bps or config.default_slippage_bps) / 100
-            # Some PumpPortal deployments are picky and reject floats like 5.0 — prefer int when possible.
+            slippage_pct   = (slippage_bps or config.default_slippage_bps) / 100
             slippage_value = (
                 int(slippage_pct)
                 if float(slippage_pct).is_integer()
@@ -250,59 +453,48 @@ class TokenCreator:
 
             create_data = {
                 "publicKey": str(creator_wallet.public_key),
-                "action": "create",
+                "action":    "create",
                 "tokenMetadata": {
-                    "name": metadata.name,
+                    "name":   metadata.name,
                     "symbol": metadata.symbol,
-                    "uri": metadata_uri,
+                    "uri":    metadata_uri,
                 },
-                # trade-local requires only the mint public key (base58, 44 chars).
-                # The full keypair is used below to sign the returned transaction.
-                "mint": mint_address,
+                "mint":            mint_address,
                 "denominatedInSol": "true",
-                "amount": initial_buy_sol,
-                "slippage": slippage_value,
-                "priorityFee": 0.0005,
-                "pool": "pump",
+                "amount":          initial_buy_sol,
+                "slippage":        slippage_value,
+                "priorityFee":     0.0005,
+                "pool":            "pump",
             }
 
-            # Request transaction from PumpPortal.
-            # trade-local expects JSON body; returns a serialised VersionedTransaction.
             logger.debug(
-                f"Sending create payload (mint={mint_address[:8]}… len={len(mint_address)}): {create_data}"
+                f"Sending create payload (mint={mint_address[:8]}…): {create_data}"
             )
+
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     self.CREATE_TX_URL,
                     headers={"Content-Type": "application/json"},
-                    content=json.dumps(create_data),  # JSON body, not form data
+                    content=json.dumps(create_data),
                 )
 
             if response.status_code != 200:
                 try:
-                    error_detail = response.json()
+                    err = response.json()
                 except Exception:
-                    error_detail = response.text
-                logger.error(
-                    f"Failed to get create transaction: {response.status_code}"
-                )
-                logger.error(f"API error detail: {error_detail}")
-                # Always log raw response text as well (PumpPortal sometimes returns plain-text errors)
-                try:
-                    logger.error(f"API raw response: {response.text}")
-                except Exception:
-                    pass
+                    err = response.text
+                logger.error(f"PumpPortal create failed {response.status_code}: {err}")
                 return None
 
-            # Parse the returned unsigned transaction, inject a fresh blockhash,
-            # then sign: mint keypair MUST be first signer per PumpPortal docs.
-            unsigned_tx = VersionedTransaction.from_bytes(response.content)
-            blockhash_resp = await self.rpc_client.get_latest_blockhash()
-            fresh_blockhash = blockhash_resp.value.blockhash
+            unsigned_tx      = VersionedTransaction.from_bytes(response.content)
+            blockhash_resp   = await self.rpc_client.get_latest_blockhash()
+            fresh_blockhash  = blockhash_resp.value.blockhash
 
             old_msg = unsigned_tx.message
             if not isinstance(old_msg, MessageV0):
-                raise TypeError(f"Expected MessageV0 from PumpPortal, got {type(old_msg).__name__}")
+                raise TypeError(
+                    f"Expected MessageV0 from PumpPortal, got {type(old_msg).__name__}"
+                )
             new_msg = MessageV0(
                 header=old_msg.header,
                 account_keys=old_msg.account_keys,
@@ -310,12 +502,8 @@ class TokenCreator:
                 instructions=old_msg.instructions,
                 address_table_lookups=old_msg.address_table_lookups,
             )
+            signed_tx = VersionedTransaction(new_msg, [mint_keypair, creator_wallet.keypair])
 
-            signed_tx = VersionedTransaction(
-                new_msg, [mint_keypair, creator_wallet.keypair]
-            )
-
-            # Broadcast the signed transaction
             logger.info("Sending token creation transaction...")
             signature = await self.rpc_client.send_raw_transaction(
                 bytes(signed_tx), opts=TxOpts(skip_preflight=True, max_retries=3)
@@ -324,27 +512,24 @@ class TokenCreator:
             if signature.value:
                 sig_str = str(signature.value)
                 logger.info(f"✓ Token created! Signature: {sig_str}")
-                logger.trade(f"Created {metadata.symbol} - Mint: {mint_address}")
-
-                # Send notification
+                logger.trade(f"Created {metadata.symbol} — Mint: {mint_address}")
                 notification_manager.notify(
                     "🪙 Token Created!",
                     f"{metadata.name} ({metadata.symbol})\nMint: {mint_address[:8]}...",
                     "normal",
                     "success",
                 )
-
                 return {
-                    "success": True,
-                    "signature": sig_str,
-                    "mint": mint_address,
+                    "success":     True,
+                    "signature":   sig_str,
+                    "mint":        mint_address,
                     "metadataUri": metadata_uri,
-                    "creator": str(creator_wallet.public_key),
-                    "initialBuy": initial_buy_sol,
+                    "creator":     str(creator_wallet.public_key),
+                    "initialBuy":  initial_buy_sol,
                 }
-            else:
-                logger.error("Failed to send transaction")
-                return None
+
+            logger.error("Transaction sent but no signature returned")
+            return None
 
         except Exception as e:
             logger.error(f"Failed to create token: {e}")
@@ -352,14 +537,16 @@ class TokenCreator:
             return None
 
 
-# Global token creator instance
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-level singleton
+# ─────────────────────────────────────────────────────────────────────────────
+
 _token_creator: Optional["TokenCreator"] = None
 _token_creator_client = None
 
 
 def get_token_creator(rpc_client: AsyncClient) -> TokenCreator:
-    """Get or create global token creator instance.
-    Recreates if a different RPC client is supplied (e.g. after reconnect)."""
+    """Return the global TokenCreator, recreating it if the RPC client changed."""
     global _token_creator, _token_creator_client
     if _token_creator is None or _token_creator_client is not rpc_client:
         _token_creator = TokenCreator(rpc_client)
