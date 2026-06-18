@@ -371,11 +371,14 @@ async def create_token_menu():
     symbol = await asyncio.to_thread(click.prompt, "Token Symbol", type=str)
     description = await asyncio.to_thread(click.prompt, "Description", type=str, default="")
 
-    # Optional fields
-    has_image = await asyncio.to_thread(click.confirm, "Do you have an image file?", default=False)
-    image_path = None
-    if has_image:
+    # Image is required by pump.fun — loop until user provides a valid file path
+    console.print("[dim]Image file (PNG/JPG/GIF/WEBP) — required by pump.fun:[/dim]")
+    import os as _os
+    while True:
         image_path = await asyncio.to_thread(click.prompt, "Image file path", type=str)
+        if _os.path.isfile(image_path):
+            break
+        console.print(f"[red]❌ File not found: {image_path}[/red] — please enter a valid path")
 
     has_socials = await asyncio.to_thread(click.confirm, "Add social links?", default=False)
     twitter, telegram, website = None, None, None
@@ -397,7 +400,7 @@ async def create_token_menu():
     console.print(f"  Name: {name}")
     console.print(f"  Symbol: {symbol}")
     console.print(f"  Description: {description or 'None'}")
-    console.print(f"  Image: {image_path or 'None'}")
+    console.print(f"  Image: {image_path}")
     console.print(f"  Initial Buy: {initial_buy} SOL")
 
     if config.require_confirmation:
@@ -429,6 +432,7 @@ async def create_token_menu():
 
         # Save token info
         import json
+        from datetime import datetime as _dt
         token_file = _CREATED_TOKENS_PATH
         token_file.parent.mkdir(parents=True, exist_ok=True)
         tokens = []
@@ -436,7 +440,8 @@ async def create_token_menu():
             tokens = json.loads(token_file.read_text())
         tokens.append({'name': name, 'symbol': symbol, 'mint': result['mint'],
                       'signature': result['signature'], 'metadataUri': result['metadataUri'],
-                      'creator': result['creator'], 'initialBuy': result.get('initialBuy', 0)})
+                      'creator': result['creator'], 'initialBuy': result.get('initialBuy', 0),
+                      'launched_at': _dt.utcnow().isoformat()})
         token_file.write_text(json.dumps(tokens, indent=2))
         console.print(f"[dim]Token info saved to {token_file}[/dim]")
 
