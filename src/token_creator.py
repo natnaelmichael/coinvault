@@ -2,6 +2,7 @@
 Token Creator for pump.fun
 Handles token creation, metadata upload, and deployment
 """
+
 import requests
 import json
 import httpx
@@ -30,7 +31,7 @@ class TokenMetadata:
         image_path: Optional[str] = None,
         twitter: Optional[str] = None,
         telegram: Optional[str] = None,
-        website: Optional[str] = None
+        website: Optional[str] = None,
     ):
         self.name = name
         self.symbol = symbol
@@ -43,21 +44,21 @@ class TokenMetadata:
     def to_form_data(self) -> Dict[str, Any]:
         """Convert to form data for IPFS upload"""
         data = {
-            'name': self.name,
-            'symbol': self.symbol,
-            'description': self.description,
-            #twitter' : self.twitter,
+            "name": self.name,
+            "symbol": self.symbol,
+            "description": self.description,
+            # twitter' : self.twitter,
             #'telegram' : self.telegram,
             #'website' : self.website,
-            'showName': 'true'
+            "showName": "true",
         }
 
         if self.twitter:
-            data['twitter'] = self.twitter
+            data["twitter"] = self.twitter
         if self.telegram:
-            data['telegram'] = self.telegram
+            data["telegram"] = self.telegram
         if self.website:
-            data['website'] = self.website
+            data["website"] = self.website
 
         return data
 
@@ -87,8 +88,7 @@ class TokenCreator:
         self.rpc_client = rpc_client
 
     async def upload_metadata_to_ipfs(
-        self,
-        metadata: TokenMetadata
+        self, metadata: TokenMetadata
     ) -> Optional[Dict[str, str]]:
         """
         Upload token metadata and image to IPFS
@@ -100,13 +100,13 @@ class TokenCreator:
             Dict with metadataUri or None if failed
         """
         try:
-            logger.info(f"Uploading metadata for {metadata.name} ({metadata.symbol}) to IPFS...")
+            logger.info(
+                f"Uploading metadata for {metadata.name} ({metadata.symbol}) to IPFS..."
+            )
 
             if config.dry_run_mode:
                 logger.info("[DRY RUN] Would upload metadata to IPFS")
-                return {
-                    'metadataUri': 'ipfs://QmDRYRUNMODE123456789/metadata.json'
-                }
+                return {"metadataUri": "ipfs://QmDRYRUNMODE123456789/metadata.json"}
 
             # Prepare form data
             form_data = metadata.to_form_data()
@@ -115,20 +115,28 @@ class TokenCreator:
             files = None
             if metadata.image_path:
                 image_path = Path(metadata.image_path).expanduser().resolve()
-                logger.debug(f"Resolved image path: {image_path} (exists: {image_path.exists()})")
+                logger.debug(
+                    f"Resolved image path: {image_path} (exists: {image_path.exists()})"
+                )
                 if image_path.exists():
-                    with open(image_path, 'rb') as f:
+                    with open(image_path, "rb") as f:
                         file_content = f.read()
                     file_name = image_path.name
                     mime_type = self._get_mime_type(file_name)
-                    files = {'file': (file_name, file_content, mime_type)}
-                    logger.info(f"Image loaded: {file_name} ({len(file_content):,} bytes)")
+                    files = {"file": (file_name, file_content, mime_type)}
+                    logger.info(
+                        f"Image loaded: {file_name} ({len(file_content):,} bytes)"
+                    )
                 else:
                     logger.error(f"Image file not found: {image_path}")
-                    logger.error("Token creation requires an image — please check the path and try again")
+                    logger.error(
+                        "Token creation requires an image — please check the path and try again"
+                    )
                     return None
             else:
-                logger.error("No image path provided — pump.fun requires an image for token creation")
+                logger.error(
+                    "No image path provided — pump.fun requires an image for token creation"
+                )
                 return None
 
             # Upload to IPFS.
@@ -144,7 +152,9 @@ class TokenCreator:
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"✓ Metadata uploaded to IPFS: {result.get('metadataUri', 'Unknown')}")
+                logger.info(
+                    f"✓ Metadata uploaded to IPFS: {result.get('metadataUri', 'Unknown')}"
+                )
                 return result
             else:
                 try:
@@ -163,20 +173,20 @@ class TokenCreator:
         """Get MIME type from filename"""
         ext = Path(filename).suffix.lower()
         mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp'
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
         }
-        return mime_types.get(ext, 'image/png')
+        return mime_types.get(ext, "image/png")
 
     async def create_token(
         self,
         creator_wallet,
         metadata: TokenMetadata,
         initial_buy_sol: float = 0.0,
-        slippage_bps: Optional[int] = None
+        slippage_bps: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a token on pump.fun
@@ -199,7 +209,7 @@ class TokenCreator:
                 logger.error("Failed to upload metadata, aborting token creation")
                 return None
 
-            metadata_uri = ipfs_response['metadataUri']
+            metadata_uri = ipfs_response["metadataUri"]
 
             # Generate new keypair for the token mint
             mint_keypair = Keypair()
@@ -220,46 +230,52 @@ class TokenCreator:
                     logger.info(f"[DRY RUN] Initial buy: {initial_buy_sol} SOL")
 
                 return {
-                    'success': True,
-                    'signature': 'DRY_RUN_SIGNATURE_' + mint_address[:8],
-                    'mint': mint_address,
-                    'metadataUri': metadata_uri,
-                    'creator': str(creator_wallet.public_key),
-                    'initialBuy': initial_buy_sol
+                    "success": True,
+                    "signature": "DRY_RUN_SIGNATURE_" + mint_address[:8],
+                    "mint": mint_address,
+                    "metadataUri": metadata_uri,
+                    "creator": str(creator_wallet.public_key),
+                    "initialBuy": initial_buy_sol,
                 }
 
             # Prepare create transaction request.
             # NOTE: PumpPortal expects slippage as a plain percent (e.g. 5), not bps (e.g. 500).
             slippage_pct = (slippage_bps or config.default_slippage_bps) / 100
             # Some PumpPortal deployments are picky and reject floats like 5.0 — prefer int when possible.
-            slippage_value = int(slippage_pct) if float(slippage_pct).is_integer() else float(slippage_pct)
+            slippage_value = (
+                int(slippage_pct)
+                if float(slippage_pct).is_integer()
+                else float(slippage_pct)
+            )
 
             create_data = {
-                'publicKey': str(creator_wallet.public_key),
-                'action': 'create',
-                'tokenMetadata': {
-                    'name': metadata.name,
-                    'symbol': metadata.symbol,
-                    'uri': metadata_uri,
+                "publicKey": str(creator_wallet.public_key),
+                "action": "create",
+                "tokenMetadata": {
+                    "name": metadata.name,
+                    "symbol": metadata.symbol,
+                    "uri": metadata_uri,
                 },
                 # trade-local requires only the mint public key (base58, 44 chars).
                 # The full keypair is used below to sign the returned transaction.
-                'mint': mint_address,
-                'denominatedInSol': 'true',
-                'amount': initial_buy_sol,
-                'slippage': slippage_value,
-                'priorityFee': 0.0005,
-                'pool': 'pump',
+                "mint": mint_address,
+                "denominatedInSol": "true",
+                "amount": initial_buy_sol,
+                "slippage": slippage_value,
+                "priorityFee": 0.0005,
+                "pool": "pump",
             }
 
             # Request transaction from PumpPortal.
             # trade-local expects JSON body; returns a serialised VersionedTransaction.
-            logger.debug(f"Sending create payload (mint={mint_address[:8]}… len={len(mint_address)}): {create_data}")
+            logger.debug(
+                f"Sending create payload (mint={mint_address[:8]}… len={len(mint_address)}): {create_data}"
+            )
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     self.CREATE_TX_URL,
-                    headers={'Content-Type': 'application/json'},
-                    content=json.dumps(create_data),      # JSON body, not form data
+                    headers={"Content-Type": "application/json"},
+                    content=json.dumps(create_data),  # JSON body, not form data
                 )
 
             if response.status_code != 200:
@@ -267,7 +283,9 @@ class TokenCreator:
                     error_detail = response.json()
                 except Exception:
                     error_detail = response.text
-                logger.error(f"Failed to get create transaction: {response.status_code}")
+                logger.error(
+                    f"Failed to get create transaction: {response.status_code}"
+                )
                 logger.error(f"API error detail: {error_detail}")
                 # Always log raw response text as well (PumpPortal sometimes returns plain-text errors)
                 try:
@@ -283,6 +301,8 @@ class TokenCreator:
             fresh_blockhash = blockhash_resp.value.blockhash
 
             old_msg = unsigned_tx.message
+            if not isinstance(old_msg, MessageV0):
+                raise TypeError(f"Expected MessageV0 from PumpPortal, got {type(old_msg).__name__}")
             new_msg = MessageV0(
                 header=old_msg.header,
                 account_keys=old_msg.account_keys,
@@ -291,13 +311,14 @@ class TokenCreator:
                 address_table_lookups=old_msg.address_table_lookups,
             )
 
-            signed_tx = VersionedTransaction(new_msg, [mint_keypair, creator_wallet.keypair])
+            signed_tx = VersionedTransaction(
+                new_msg, [mint_keypair, creator_wallet.keypair]
+            )
 
             # Broadcast the signed transaction
             logger.info("Sending token creation transaction...")
             signature = await self.rpc_client.send_raw_transaction(
-                bytes(signed_tx),
-                opts=TxOpts(skip_preflight=True, max_retries=3)
+                bytes(signed_tx), opts=TxOpts(skip_preflight=True, max_retries=3)
             )
 
             if signature.value:
@@ -310,16 +331,16 @@ class TokenCreator:
                     "🪙 Token Created!",
                     f"{metadata.name} ({metadata.symbol})\nMint: {mint_address[:8]}...",
                     "normal",
-                    "success"
+                    "success",
                 )
 
                 return {
-                    'success': True,
-                    'signature': sig_str,
-                    'mint': mint_address,
-                    'metadataUri': metadata_uri,
-                    'creator': str(creator_wallet.public_key),
-                    'initialBuy': initial_buy_sol
+                    "success": True,
+                    "signature": sig_str,
+                    "mint": mint_address,
+                    "metadataUri": metadata_uri,
+                    "creator": str(creator_wallet.public_key),
+                    "initialBuy": initial_buy_sol,
                 }
             else:
                 logger.error("Failed to send transaction")
@@ -332,7 +353,7 @@ class TokenCreator:
 
 
 # Global token creator instance
-_token_creator: Optional['TokenCreator'] = None
+_token_creator: Optional["TokenCreator"] = None
 _token_creator_client = None
 
 
