@@ -1344,7 +1344,7 @@ class SellWithdrawPane(Container):
         finally:
             self.query_one("#btn-sw-exec", Button).disabled = False
 
-
+'''
 class PreloadPane(Container):
     """💾 Pre-load token metadata for later launch."""
 
@@ -1513,7 +1513,320 @@ class PreloadPane(Container):
             self._refresh_list()
         else:
             log.write("[red]✗ Launch failed[/red]")
+'''
+class PreloadPane(Container):
+    """💾 Pre-load token metadata for later launch."""
 
+    DEFAULT_CSS = """
+    PreloadPane { padding: 1 2; layout: vertical; height: 1fr; }
+    PreloadPane .pane-title   { color: $accent; text-style: bold; margin-bottom: 1; }
+    PreloadPane .btn-row      { height: 3; margin-bottom: 1; }
+    PreloadPane .btn-row Button { margin-right: 1; }
+    PreloadPane #pl-main      { layout: horizontal; height: 1fr; }
+    PreloadPane #pl-table     { width: 1fr; border: solid $border; }
+    PreloadPane #pl-edit-panel {
+        width: 46; border: solid $accent; display: none;
+        margin-left: 1; padding: 1 1; layout: vertical;
+        background: $surface;
+    }
+    PreloadPane .ep-title     { color: $accent; text-style: bold; margin-bottom: 1;
+                                border-bottom: solid $border; padding-bottom: 1; }
+    PreloadPane .field-row    { height: 3; layout: horizontal; align: left middle; }
+    PreloadPane .field-label  { width: 14; text-align: right; padding-right: 1; color: $text-muted; }
+    PreloadPane .field-input  { width: 1fr; }
+    PreloadPane .ep-btn-row   { height: 3; margin-top: 1; }
+    PreloadPane .ep-btn-row Button { margin-right: 1; }
+    PreloadPane #pl-form      { display: none; }
+    PreloadPane RichLog       { height: 8; border: solid $border; margin-top: 1; }
+    """
+
+    _edit_open: bool = False
+    _edit_idx:  int  = -1
+
+    def compose(self) -> ComposeResult:
+        yield Static("💾  Pre-load Token & Launch Later", classes="pane-title")
+        with Horizontal(classes="btn-row"):
+            yield Button("Pre-load New",      id="btn-pl-new")
+            yield Button("Launch Pre-loaded", variant="primary", id="btn-pl-launch")
+            yield Button("Refresh List",      id="btn-pl-refresh")
+            yield Button("Edit Pre-loaded",   id="btn-pl-edit")   # far right, toggles panel
+
+        # Main content area: table + sliding edit panel sit side by side
+        with Horizontal(id="pl-main"):
+            yield DataTable(id="pl-table", cursor_type="row")
+            with Container(id="pl-edit-panel"):
+                yield Static("✏️  Edit Token", classes="ep-title", id="ep-heading")
+                for fid, label, ph in [
+                    ("ep-name",     "Name:",        "My Token"),
+                    ("ep-symbol",   "Symbol:",      "MTK"),
+                    ("ep-desc",     "Description:", "…"),
+                    ("ep-image",    "Image path:",  "/path/image.png"),
+                    ("ep-twitter",  "Twitter:",     "https://x.com/…"),
+                    ("ep-telegram", "Telegram:",    "https://t.me/…"),
+                    ("ep-website",  "Website:",     "https://…"),
+                    ("ep-ibuy",     "Initial buy:", "0.0"),
+                ]:
+                    with Horizontal(classes="field-row"):
+                        yield Label(label, classes="field-label")
+                        yield Input(placeholder=ph, id=fid, classes="field-input")
+                with Horizontal(classes="ep-btn-row"):
+                    yield Button("Save", variant="success", id="btn-ep-save")
+                    yield Button("Clear", id="btn-ep-clear")
+
+        # New token form — hidden until "Pre-load New" is pressed
+        with Container(id="pl-form"):
+            for fid, label, ph in [
+                ("pl-name",     "Token Name:",      "My Token"),
+                ("pl-symbol",   "Symbol:",          "MTK"),
+                ("pl-desc",     "Description:",     "…"),
+                ("pl-image",    "Image path:",      "/path/image.png"),
+                ("pl-twitter",  "Twitter URL:",     "https://x.com/…"),
+                ("pl-telegram", "Telegram URL:",    "https://t.me/…"),
+                ("pl-website",  "Website:",         "https://…"),
+                ("pl-ibuy",     "Initial buy SOL:", "0.0"),
+            ]:
+                with Horizontal(classes="field-row"):
+                    yield Label(label, classes="field-label")
+                    yield Input(placeholder=ph, id=fid, classes="field-input")
+            with Horizontal(classes="btn-row"):
+                yield Button("Save Pre-load", variant="success", id="btn-pl-save")
+                yield Button("Cancel",        id="btn-pl-cancel")
+
+        yield RichLog(id="pl-log", highlight=True, markup=True)
+
+    def on_mount(self) -> None:
+        tbl = self.query_one("#pl-table", DataTable)
+        tbl.add_columns("#", "Name", "Symbol", "Status", "Initial Buy")
+        self._refresh_list()
+
+    def on_show(self) -> None:
+        self._refresh_list()
+
+    def _refresh_list(self) -> None:
+        tbl = self.query_one("#pl-table", DataTable)
+        tbl.clear()
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        if not p.exists():
+            return
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        for i, t in enumerate(tokens, 1):
+            status = "✓ Launched" if t.get("status") == "launched" else "⏳ Pre-loaded"
+            tbl.add_row(
+                str(i),
+                t.get("name", "?"),
+                t.get("symbol", "?"),
+                status,
+                f"{t.get('initial_buy', 0)} SOL",
+            )
+
+    def _load_into_edit(self, idx: int) -> None:
+        """Populate the edit panel fields from the token at idx."""
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        if idx < 0 or idx >= len(tokens):
+            return
+        t = tokens[idx]
+        self._edit_idx = idx
+        self.query_one("#ep-heading", Static).update(
+            f"✏️  Editing: [bold]{t.get('symbol', '?')}[/bold]"
+        )
+        for fid, key in [
+            ("ep-name",     "name"),
+            ("ep-symbol",   "symbol"),
+            ("ep-desc",     "description"),
+            ("ep-image",    "image_path"),
+            ("ep-twitter",  "twitter"),
+            ("ep-telegram", "telegram"),
+            ("ep-website",  "website"),
+            ("ep-ibuy",     "initial_buy"),
+        ]:
+            self.query_one(f"#{fid}", Input).value = str(t.get(key) or "")
+
+    # ── Button handlers ───────────────────────────────────────────────────────
+
+    @on(Button.Pressed, "#btn-pl-refresh")
+    def on_refresh(self) -> None:
+        self._refresh_list()
+
+    @on(Button.Pressed, "#btn-pl-new")
+    def on_new(self) -> None:
+        self.query_one("#pl-form").display = True
+        self.query_one("#pl-main").display = False
+
+    @on(Button.Pressed, "#btn-pl-cancel")
+    def on_cancel(self) -> None:
+        self.query_one("#pl-form").display = False
+        self.query_one("#pl-main").display = True
+
+    @on(Button.Pressed, "#btn-pl-edit")
+    def on_toggle_edit(self) -> None:
+        self._edit_open = not self._edit_open
+        panel = self.query_one("#pl-edit-panel")
+        panel.display = self._edit_open
+        # Highlight the button while panel is open so it's clear it's active
+        self.query_one("#btn-pl-edit", Button).variant = (
+            "primary" if self._edit_open else "default"
+        )
+        if self._edit_open:
+            # Auto-load whichever row is already highlighted
+            tbl = self.query_one("#pl-table", DataTable)
+            if tbl.cursor_row is not None:
+                self._load_into_edit(tbl.cursor_row)
+
+    @on(DataTable.RowHighlighted, "#pl-table")
+    def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """While edit panel is open, update the form as the cursor moves."""
+        if self._edit_open and event.cursor_row is not None:
+            self._load_into_edit(event.cursor_row)
+
+    @on(Button.Pressed, "#btn-ep-save")
+    def on_edit_save(self) -> None:
+        if self._edit_idx < 0:
+            self.notify("No token selected — move cursor to a row first", severity="warning")
+            return
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        if self._edit_idx >= len(tokens):
+            return
+
+        def _get(fid: str) -> str:
+            return self.query_one(f"#{fid}", Input).value.strip()
+
+        try:
+            ibuy = float(_get("ep-ibuy") or "0")
+        except ValueError:
+            ibuy = 0.0
+
+        tokens[self._edit_idx].update({
+            "name":        _get("ep-name"),
+            "symbol":      _get("ep-symbol"),
+            "description": _get("ep-desc"),
+            "image_path":  _get("ep-image") or None,
+            "twitter":     _get("ep-twitter") or None,
+            "telegram":    _get("ep-telegram") or None,
+            "website":     _get("ep-website") or None,
+            "initial_buy": ibuy,
+        })
+        p.write_text(json.dumps(tokens, indent=2))
+        self.notify(
+            f"Saved {tokens[self._edit_idx].get('symbol', '?')}", severity="information"
+        )
+        self._refresh_list()
+
+    @on(Button.Pressed, "#btn-ep-clear")
+    def on_edit_clear(self) -> None:
+        for fid in (
+            "ep-name", "ep-symbol", "ep-desc", "ep-image",
+            "ep-twitter", "ep-telegram", "ep-website", "ep-ibuy",
+        ):
+            self.query_one(f"#{fid}", Input).value = ""
+        self._edit_idx = -1
+        self.query_one("#ep-heading", Static).update("✏️  Edit Token")
+
+    @on(Button.Pressed, "#btn-pl-save")
+    def on_save(self) -> None:
+        def _get(fid: str) -> str:
+            return self.query_one(f"#{fid}", Input).value.strip()
+        name   = _get("pl-name")
+        symbol = _get("pl-symbol")
+        if not name or not symbol:
+            self.notify("Name and Symbol required", severity="error")
+            return
+        try:
+            ibuy = float(_get("pl-ibuy") or "0")
+        except ValueError:
+            ibuy = 0.0
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        p.parent.mkdir(exist_ok=True)
+        tokens = []
+        if p.exists():
+            try:
+                tokens = json.loads(p.read_text())
+            except Exception:
+                pass
+        tokens.append({
+            "name":        name,
+            "symbol":      symbol,
+            "description": _get("pl-desc"),
+            "image_path":  _get("pl-image") or None,
+            "twitter":     _get("pl-twitter") or None,
+            "telegram":    _get("pl-telegram") or None,
+            "website":     _get("pl-website") or None,
+            "initial_buy": ibuy,
+            "created_at":  datetime.now().isoformat(),
+            "status":      "preloaded",
+        })
+        p.write_text(json.dumps(tokens, indent=2))
+        self.notify(f"Pre-loaded {symbol}", severity="information")
+        self.on_cancel()
+        self._refresh_list()
+
+    @on(Button.Pressed, "#btn-pl-launch")
+    def on_launch(self) -> None:
+        tbl = self.query_one("#pl-table", DataTable)
+        if tbl.cursor_row is None:
+            self.notify("Select a token row first", severity="warning")
+            return
+        self._do_launch(tbl.cursor_row)
+
+    @work(exclusive=True)
+    async def _do_launch(self, row_idx: int) -> None:
+        log = self.query_one("#pl-log", RichLog)
+        p   = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        if not p.exists():
+            return
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        if row_idx >= len(tokens):
+            return
+        t = tokens[row_idx]
+        if not wallet_manager.dev_wallet:
+            log.write("[red]✗ Dev wallet not configured[/red]")
+            return
+        log.write(f"[cyan]Launching {t.get('symbol')}…[/cyan]")
+        meta = TokenMetadata(
+            name=t.get("name", ""),
+            symbol=t.get("symbol", ""),
+            description=t.get("description", ""),
+            image_path=t.get("image_path"),
+            twitter=t.get("twitter"),
+            telegram=t.get("telegram"),
+            website=t.get("website"),
+        )
+        creator = get_token_creator(wallet_manager.rpc_client)
+        result  = await creator.create_token(
+            wallet_manager.dev_wallet, meta, t.get("initial_buy", 0)
+        )
+        if result and result.get("success"):
+            mint = result["mint"]
+            t["status"]      = "launched"
+            t["mint"]        = mint
+            t["launched_at"] = datetime.now().isoformat()
+            p.write_text(json.dumps(tokens, indent=2))
+            _save_token({
+                "name":        t["name"],
+                "symbol":      t["symbol"],
+                "mint":        mint,
+                "signature":   result["signature"],
+                "metadataUri": result.get("metadataUri", ""),
+                "launched_at": t["launched_at"],
+            })
+            log.write(f"[green]✓ Launched!  Mint: {mint}[/green]")
+            log.write(f"  https://pump.fun/coin/{mint}")
+            self._refresh_list()
+        else:
+            log.write("[red]✗ Launch failed[/red]")
 
 class ManageWalletsPane(Container):
     """⚙️ Add, remove and view wallets."""

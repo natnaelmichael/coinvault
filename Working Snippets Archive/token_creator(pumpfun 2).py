@@ -70,12 +70,9 @@ class TokenCreator:
     # pump.fun API endpoints
     # IPFS metadata upload goes directly to pump.fun (pumpportal has no /api/ipfs).
     # The trade/create endpoint lives on pumpportal.fun.
-    #Deprecated IPFS_UPLOAD_URL = "https://pump.fun/api/ipfs"
-    #Corrected — Pinata v3 upload endpoint:
-    IPFS_UPLOAD_URL = "https://uploads.pinata.cloud/v3/files"
+    IPFS_UPLOAD_URL = "https://pump.fun/api/ipfs"
     CREATE_TX_URL = "https://pumpportal.fun/api/trade-local"
 
-    '''
     # pump.fun's /api/ipfs endpoint validates that requests look like they come
     # from a browser. Without a matching User-Agent + Origin it returns 404.
     IPFS_HEADERS = {
@@ -87,12 +84,11 @@ class TokenCreator:
         "Origin": "https://pump.fun",
         "Referer": "https://pump.fun/",
     }
-    '''
 
     def __init__(self, rpc_client: AsyncClient):
         self.rpc_client = rpc_client
 
-    async def upload_to_ipfs(
+    async def upload_metadata_to_ipfs(
         self,
         metadata: TokenMetadata
     ) -> Optional[Dict[str, str]]:
@@ -111,11 +107,10 @@ class TokenCreator:
             if config.dry_run_mode:
                 logger.info("[DRY RUN] Would upload metadata to IPFS")
                 return {
-                    'data': {'cid': 'QmDRYRUNMODE123456789'}
+                    'metadataUri': 'ipfs://QmDRYRUNMODE123456789/metadata.json'
                 }
 
-            '''
-            # Prepare form data (Start of processing)
+            # Prepare form data
             form_data = metadata.to_form_data()
 
             # Prepare image file
@@ -148,75 +143,17 @@ class TokenCreator:
                     files=files,
                     headers=self.IPFS_HEADERS,
                 )
-                '''
 
-            #Two-step Pinata upload
-            pinata_headers = {"Authorization": f"Bearer {config.pinata_jwt}"}
-            async with httpx.AsyncClient(timeout=60) as client:
-                #Step 0: Common steps and Prepare Image File
-                form = {"network": "public"}
-                # Prepare image file
-                files = None
-                if metadata.image_path:
-                    image_path = Path(metadata.image_path).expanduser().resolve()
-                    logger.debug(f"Resolved image path: {image_path} (exists: {image_path.exists()})")
-                    if image_path.exists():
-                        with open(image_path, 'rb') as f:
-                            file_content = f.read()
-                        file_name = image_path.name
-                        mime_type = self._get_mime_type(file_name)
-                        files = {'file': (file_name, file_content, mime_type)}
-                        logger.info(f"Image loaded: {file_name} ({len(file_content):,} bytes)")
-                    else:
-                        logger.error(f"Image file not found: {image_path}")
-                        logger.error("Token creation requires an image — please check the path and try again")
-                        return None
-                else:
-                    logger.error("No image path provided — pump.fun requires an image for token creation")
-                    return None
-
-                # Step 1: upload image
-                #img_form = {"network": "public"}
-                img_files = {"file": (file_name, file_content, mime_type)}
-                img_resp = await client.post(
-                    self.IPFS_UPLOAD_URL, data=form, files=img_files, headers=pinata_headers
-                )
-                img_cid = img_resp.json()["data"]["cid"]
-                image_url = f"https://ipfs.io/ipfs/{img_cid}"
-
-                # Step 2: upload metadata JSON
-                meta_json = json.dumps({
-                    "name": metadata.name,
-                    "symbol": metadata.symbol,
-                    "description": metadata.description,
-                    "image": image_url,
-                    "twitter": metadata.twitter or "",
-                    "telegram": metadata.telegram or "",
-                    "website": metadata.website or "",
-                })
-                meta_file = ("metadata.json", meta_json.encode(), "application/json")
-                #meta_form = {"network": "public"}
-                meta_resp = await client.post(
-                    self.IPFS_UPLOAD_URL, data=form,
-                    files={"file": meta_file}, headers=pinata_headers
-                )
-
-            response = meta_resp  # used by status check below
-
-            #Post-Processing
             if response.status_code == 200:
-                logger.debug(response)
                 result = response.json()
-                logger.debug(response.json())
-                #logger.info(f"✓ Metadata uploaded to IPFS: {result.get('metadataUri', 'Unknown')}")
-                logger.info(f"✓ Metadata uploaded to IPFS: https://ipfs.io/ipfs/{result['data']['cid']}")
+                logger.info(f"✓ Metadata uploaded to IPFS: {result.get('metadataUri', 'Unknown')}")
                 return result
             else:
                 try:
                     error_detail = response.json()
                 except Exception:
-                    error_detail = response.text()#Added brackets
-                logger.error(f"IPFS upload failed: {response.status_code}")#Added brackets, then removed them again.
+                    error_detail = response.text
+                logger.error(f"IPFS upload failed: {response.status_code}")
                 logger.error(f"IPFS error detail: {error_detail}")
                 return None
 
@@ -259,15 +196,12 @@ class TokenCreator:
             logger.info(f"Creating token: {metadata.name} ({metadata.symbol})")
 
             # Upload metadata to IPFS
-            ipfs_response = await self.upload_to_ipfs(metadata)
+            ipfs_response = await self.upload_metadata_to_ipfs(metadata)
             if not ipfs_response:
                 logger.error("Failed to upload metadata, aborting token creation")
                 return None
 
-            #metadata_uri = ipfs_response['metadataUri'] #This line is deprecated. DO NOT EDIT.
-            metadata_uri = f"https://ipfs.io/ipfs/{ipfs_response['data']['cid']}"
-
-            await asyncio.sleep(3) #Give the ipfs network time to propagate.
+            metadata_uri = ipfs_response['metadataUri']
 
             # Generate new keypair for the token mint
             mint_keypair = Keypair()
@@ -279,7 +213,6 @@ class TokenCreator:
             mint_keypair_b58 = base58.b58encode(bytes(mint_keypair)).decode("utf-8")
 
             logger.info(f"Token mint address: {mint_address}")
-            #logger.info(f"✓ Metadata uploaded to IPFS: https://ipfs.io/ipfs/{ipfs_response['data']['cid']}") #This line is deprecated. DO NOT EDIT.
 
             if config.dry_run_mode:
                 logger.info("[DRY RUN] Would create token on pump.fun")
@@ -311,16 +244,13 @@ class TokenCreator:
                     'symbol': metadata.symbol,
                     'uri': metadata_uri,
                 },
-                # PumpPortal requires the pubkey, NOT the 64-byte mint keypair as base58. Do not change this section.
-                # so it can co-sign the mint account creation server-side.
-                #'mint': mint_keypair_b58,
-                'mint': mint_address,#str(mint_keypair.pubkey()) is the value.
+                'mint': str(mint_keypair.pubkey()),   # pubkey only
                 'denominatedInSol': 'true',
                 'amount': initial_buy_sol,
                 'slippage': slippage_value,
                 'priorityFee': 0.0005,
-                'pool': 'pump'
-                #'isMayhemMode': 'false'
+                'pool': 'pump',
+                'isMayhemMode': 'false'
             }
 
             # Request transaction from pump.fun API.
@@ -336,7 +266,7 @@ class TokenCreator:
 
             if response.status_code != 200:
                 try:
-                    error_detail = response.json() #Try to make a json.
+                    error_detail = response.json()
                 except Exception:
                     error_detail = response.text
                 logger.error(f"Failed to get create transaction: {response.status_code}")

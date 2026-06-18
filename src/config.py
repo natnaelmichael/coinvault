@@ -91,10 +91,10 @@ class Config:
 
     def _load_config(self):
         """Load all configuration values"""
-        # Solana Network
+        # Solana Network/IPFS
         self.rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
         self.network = os.getenv("SOLANA_NETWORK", "mainnet-beta")
-
+        self.pinata_jwt = os.getenv("PINATA_JWT", "")
         # Wallets
         self.dev_wallet_key = os.getenv("DEV_WALLET_PRIVATE_KEY", "")
         fund_keys_str = os.getenv("FUND_WALLET_PRIVATE_KEYS", "")# + os.getenv("FUND_WALLET_PRIVATE_KEYS2", "")
