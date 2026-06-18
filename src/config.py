@@ -1,6 +1,8 @@
 """
 Configuration Manager
-Handles loading and validating all bot settings from .env file
+Handles loading and validating all bot settings from environment variables.
+On Replit, secrets are injected automatically. A local .env file is also
+supported for development convenience.
 """
 
 import os
@@ -13,14 +15,14 @@ class Config:
     """Central configuration manager for the pump.fun bot"""
 
     def __init__(self, env_path: Optional[str] = None):
-        """Initialize configuration from .env file"""
+        """Initialize configuration from environment variables (and optional .env file)"""
         self._env_file: Optional[Path] = None
 
         if env_path:
             self._env_file = Path(env_path)
             load_dotenv(env_path)
         else:
-            # Try multiple locations for .env: cwd first, then project root relative to this file
+            # Try loading a local .env file if present (Replit secrets take precedence)
             candidates = [
                 Path.cwd() / ".env",
                 Path(__file__).parent.parent / ".env",
@@ -28,11 +30,7 @@ class Config:
             ]
             self._env_file = next((p for p in candidates if p.exists()), None)
             if self._env_file:
-                load_dotenv(self._env_file)
-                print(f"✓  Loaded .env from {self._env_file}")
-            else:
-                print(f"⚠️  No .env file found (searched: {', '.join(str(p) for p in candidates)})")
-                print(f"⚠️  Please copy .env.example to .env and configure it")
+                load_dotenv(self._env_file, override=False)
 
         self._load_config()
 
