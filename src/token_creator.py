@@ -453,18 +453,18 @@ class TokenCreator:
 
             create_data = {
                 "publicKey": str(creator_wallet.public_key),
-                "action":    "create",
+                "action": "create",
                 "tokenMetadata": {
-                    "name":   metadata.name,
+                    "name": metadata.name,
                     "symbol": metadata.symbol,
-                    "uri":    metadata_uri,
+                    "uri": metadata_uri,
                 },
-                "mint":            mint_address,
+                "mint": mint_address,
                 "denominatedInSol": "true",
-                "amount":          initial_buy_sol,
-                "slippage":        slippage_value,
-                "priorityFee":     0.0005,
-                "pool":            "pump",
+                "amount": initial_buy_sol,
+                "slippage": slippage_value,
+                "priorityFee": 0.0005,
+                "pool": "pump",
             }
 
             logger.debug(
