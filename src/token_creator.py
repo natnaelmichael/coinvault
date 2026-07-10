@@ -3,7 +3,12 @@ Token Creator for pump.fun
 Handles token creation, metadata upload, and deployment.
 
 IPFS upload supports two modes (set IPFS_MODE in .env):
-  pumpfun  (default) — uploads via pump.fun's internal /api/ipfs endpoint
+  pumpfun  (default) — uploads via Pinata's IPFS API. (Originally hit
+                      pump.fun's own /api/ipfs endpoint, but pump.fun no
+                      longer allows direct metadata uploads there — that
+                      endpoint is deprecated. Pinata is the replacement
+                      PumpPortal's own docs now point to. Requires
+                      PINATA_JWT to be set in .env.)
   local             — uploads via a locally-running IPFS daemon (ipfs daemon)
                       with a 2-stage reliability check:
                         Stage 1: pin locally + announce to the DHT
@@ -69,18 +74,9 @@ class TokenMetadata:
 class TokenCreator:
     """Handles token creation on pump.fun"""
 
-    IPFS_UPLOAD_URL = "https://pump.fun/api/ipfs"
-    CREATE_TX_URL   = "https://pumpportal.fun/api/trade-local"
-
-    IPFS_HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Origin":  "https://pump.fun",
-        "Referer": "https://pump.fun/",
-    }
+    PINATA_UPLOAD_URL  = "https://uploads.pinata.cloud/v3/files"
+    PINATA_GATEWAY_URL = "https://ipfs.io/ipfs"
+    CREATE_TX_URL      = "https://pumpportal.fun/api/trade-local"
 
     def __init__(self, rpc_client: AsyncClient):
         self.rpc_client = rpc_client
@@ -116,13 +112,36 @@ class TokenCreator:
             return await self._upload_metadata_pumpfun(metadata)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Backend A — pump.fun /api/ipfs  (original behaviour)
+    # Backend A — Pinata  (replaces the now-dead pump.fun /api/ipfs endpoint)
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _upload_metadata_pumpfun(
         self, metadata: TokenMetadata
     ) -> Optional[Dict[str, str]]:
-        """Upload via pump.fun's internal Next.js IPFS endpoint."""
+        """
+        Upload image + metadata JSON to IPFS via Pinata.
+
+        pump.fun's own /api/ipfs endpoint no longer accepts direct uploads
+        (deprecated). Pinata is the replacement path PumpPortal's current
+        docs use, so this mirrors that: upload the image, build the
+        metadata JSON referencing the image's IPFS gateway URL, upload that,
+        and return the metadata's gateway URL as metadataUri.
+
+        Requires config.pinata_jwt (a Pinata JWT with upload scope) to be
+        set. Get a free key at https://app.pinata.cloud/developers/api-keys
+        """
+        pinata_jwt = getattr(config, "pinata_jwt", None)
+        if not pinata_jwt:
+            logger.error(
+                "PINATA_JWT is not configured. pump.fun's own /api/ipfs "
+                "endpoint is deprecated, so a Pinata JWT is now required "
+                "for IPFS_MODE=pumpfun. Add PINATA_JWT to your .env, or "
+                "set IPFS_MODE=local to use your own IPFS daemon instead."
+            )
+            return None
+
+        headers = {"Authorization": f"Bearer {pinata_jwt}"}
+
         try:
             image_path = Path(metadata.image_path).expanduser().resolve()
             if not image_path.exists():
@@ -132,33 +151,60 @@ class TokenCreator:
             file_content = image_path.read_bytes()
             file_name    = image_path.name
             mime_type    = self._get_mime_type(file_name)
-            logger.info(f"Image loaded: {file_name} ({len(file_content):,} bytes)")
-
-            form_data = metadata.to_form_data()
-            files     = {"file": (file_name, file_content, mime_type)}
+            logger.info(f"[PINATA] Uploading image: {file_name} ({len(file_content):,} bytes)...")
 
             async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    self.IPFS_UPLOAD_URL,
-                    data=form_data,
-                    files=files,
-                    headers=self.IPFS_HEADERS,
+                image_resp = await client.post(
+                    self.PINATA_UPLOAD_URL,
+                    headers=headers,
+                    data={"network": "public"},
+                    files={"file": (file_name, file_content, mime_type)},
                 )
 
-            if response.status_code == 200:
-                result = response.json()
-                logger.info(f"✓ pump.fun IPFS upload OK: {result.get('metadataUri')}")
-                return result
+            if image_resp.status_code not in (200, 201):
+                logger.error(f"[PINATA] Image upload failed {image_resp.status_code}: {image_resp.text}")
+                return None
 
-            try:
-                err = response.json()
-            except Exception:
-                err = response.text
-            logger.error(f"pump.fun IPFS upload failed {response.status_code}: {err}")
-            return None
+            image_cid = image_resp.json()["data"]["cid"]
+            image_url = f"{self.PINATA_GATEWAY_URL}/{image_cid}"
+            logger.info(f"  ✓ Image CID: {image_cid}")
+
+            metadata_doc: Dict[str, Any] = {
+                "name": metadata.name,
+                "symbol": metadata.symbol,
+                "description": metadata.description,
+                "image": image_url,
+                "showName": True,
+            }
+            if metadata.twitter:
+                metadata_doc["twitter"] = metadata.twitter
+            if metadata.telegram:
+                metadata_doc["telegram"] = metadata.telegram
+            if metadata.website:
+                metadata_doc["website"] = metadata.website
+
+            meta_bytes = json.dumps(metadata_doc).encode()
+            logger.info(f"[PINATA] Uploading metadata JSON ({len(meta_bytes)} bytes)...")
+
+            async with httpx.AsyncClient(timeout=60) as client:
+                meta_resp = await client.post(
+                    self.PINATA_UPLOAD_URL,
+                    headers=headers,
+                    data={"network": "public"},
+                    files={"file": ("metadata.json", meta_bytes, "application/json")},
+                )
+
+            if meta_resp.status_code not in (200, 201):
+                logger.error(f"[PINATA] Metadata upload failed {meta_resp.status_code}: {meta_resp.text}")
+                return None
+
+            meta_cid = meta_resp.json()["data"]["cid"]
+            metadata_uri = f"{self.PINATA_GATEWAY_URL}/{meta_cid}"
+            logger.info(f"✓ Pinata upload complete — URI: {metadata_uri}")
+            return {"metadataUri": metadata_uri}
 
         except Exception as e:
-            logger.error(f"pump.fun IPFS upload exception: {e}")
+            logger.error(f"[PINATA] upload exception: {e}")
             return None
 
     # ─────────────────────────────────────────────────────────────────────────

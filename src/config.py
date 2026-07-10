@@ -93,6 +93,9 @@ class Config:
         self.rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
         self.network = os.getenv("SOLANA_NETWORK", "mainnet-beta")
 
+        #Pinata for Solana:
+        self.pinata_jwt = os.getenv("PINATA_JWT","")
+
         # Wallets
         self.dev_wallet_key = os.getenv("DEV_WALLET_PRIVATE_KEY", "")
         fund_keys_str = os.getenv("FUND_WALLET_PRIVATE_KEYS", "")# + os.getenv("FUND_WALLET_PRIVATE_KEYS2", "")
@@ -154,6 +157,9 @@ class Config:
 
         if not self.fund_wallet_keys:
             errors.append("No FUND_WALLET_PRIVATE_KEYS configured (comma-separated keys in .env)")
+
+        if not self.pinata_jwt:
+            errors.append("PINATA_JWT is not set")
 
         if self.max_buy_amount_sol < self.min_buy_amount_sol:
             errors.append("MAX_BUY_AMOUNT_SOL must be >= MIN_BUY_AMOUNT_SOL")
