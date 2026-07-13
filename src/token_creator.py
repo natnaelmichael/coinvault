@@ -23,14 +23,12 @@ import httpx
 from typing import Optional, Dict, Any
 from pathlib import Path
 from solders.keypair import Keypair
-from solders.message import MessageV0
-from solders.transaction import VersionedTransaction
 from solana.rpc.async_api import AsyncClient
-from solana.rpc.types import TxOpts
 
 from .config import config
 from .logger import logger
 from .notifications import notification_manager
+from .solana_tx import sign_and_send
 
 
 class TokenMetadata:
@@ -532,32 +530,18 @@ class TokenCreator:
                 logger.error(f"PumpPortal create failed {response.status_code}: {err}")
                 return None
 
-            unsigned_tx      = VersionedTransaction.from_bytes(response.content)
-            blockhash_resp   = await self.rpc_client.get_latest_blockhash()
-            fresh_blockhash  = blockhash_resp.value.blockhash
-
-            old_msg = unsigned_tx.message
-            if not isinstance(old_msg, MessageV0):
-                raise TypeError(
-                    f"Expected MessageV0 from PumpPortal, got {type(old_msg).__name__}"
-                )
-            new_msg = MessageV0(
-                header=old_msg.header,
-                account_keys=old_msg.account_keys,
-                recent_blockhash=fresh_blockhash,
-                instructions=old_msg.instructions,
-                address_table_lookups=old_msg.address_table_lookups,
-            )
-            signed_tx = VersionedTransaction(new_msg, [mint_keypair, creator_wallet.keypair])
-
+            # Deserialize, refresh blockhash, sign, send, and confirm —
+            # shared pipeline (see solana_tx.py). Preserves the
+            # blockhash-refresh-before-signing behavior exactly as before.
             logger.info("Sending token creation transaction...")
-            signature = await self.rpc_client.send_raw_transaction(
-                bytes(signed_tx), opts=TxOpts(skip_preflight=True, max_retries=3)
+            result = await sign_and_send(
+                self.rpc_client,
+                response.content,
+                signers=[mint_keypair, creator_wallet.keypair],
             )
 
-            if signature.value:
-                sig_str = str(signature.value)
-                logger.info(f"✓ Token created! Signature: {sig_str}")
+            if result.success and result.confirmed:
+                logger.info(f"✓ Token created! Signature: {result.signature}")
                 logger.trade(f"Created {metadata.symbol} — Mint: {mint_address}")
                 notification_manager.notify(
                     "🪙 Token Created!",
@@ -567,14 +551,14 @@ class TokenCreator:
                 )
                 return {
                     "success":     True,
-                    "signature":   sig_str,
+                    "signature":   result.signature,
                     "mint":        mint_address,
                     "metadataUri": metadata_uri,
                     "creator":     str(creator_wallet.public_key),
                     "initialBuy":  initial_buy_sol,
                 }
 
-            logger.error("Transaction sent but no signature returned")
+            logger.error(f"Token creation failed or unconfirmed: {result.error}")
             return None
 
         except Exception as e:
