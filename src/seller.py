@@ -4,7 +4,6 @@ Handles selling tokens and withdrawing funds
 """
 
 import asyncio
-import httpx
 from typing import List, Optional, Dict, Any
 from solders.transaction import Transaction
 from solders.message import Message
@@ -19,6 +18,7 @@ from .config import config
 from .logger import logger
 from .notifications import notification_manager
 from .solana_tx import sign_and_send
+from .pumpportal_api import post_with_retry
 
 # Rent-exempt minimum for a plain account (0.00089088 SOL as of 2024)
 RENT_EXEMPT_MINIMUM_LAMPORTS = 890880
@@ -158,13 +158,13 @@ class TokenSeller:
                 sell_data['amount'] = amount_tokens
             # If neither is set, omit 'amount' entirely → PumpPortal sells all tokens
 
-            # Request transaction from API.
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(
-                    self.SELL_API_URL,
-                    json=sell_data,
-                    headers={'Content-Type': 'application/json'}
-                )
+            # Request transaction from API. Retries automatically on
+            # transient 502/503 (see pumpportal_api.py).
+            response = await post_with_retry(
+                self.SELL_API_URL,
+                json_body=sell_data,
+                headers={'Content-Type': 'application/json'}
+            )
 
             if response.status_code != 200:
                 error_msg = f"API error: {response.status_code} - {response.text}"

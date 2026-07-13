@@ -4,7 +4,6 @@ Handles buying tokens on pump.fun with multiple wallets
 """
 
 import asyncio
-import httpx
 from typing import List, Optional, Dict, Any
 from solana.rpc.async_api import AsyncClient
 
@@ -12,6 +11,7 @@ from .config import config
 from .logger import logger
 from .notifications import notification_manager
 from .solana_tx import sign_and_send
+from .pumpportal_api import post_with_retry
 
 
 class BuyResult:
@@ -86,15 +86,13 @@ class TokenBuyer:
                 'pool': 'pump'
             }
             
-            # Request transaction from API.
-            # Using httpx.AsyncClient so this await yields to the event loop
-            # while waiting, allowing other wallet coroutines to run concurrently.
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(
-                    self.BUY_API_URL,
-                    json=buy_data,
-                    headers={'Content-Type': 'application/json'}
-                )
+            # Request transaction from API. Retries automatically on
+            # transient 502/503 (see pumpportal_api.py).
+            response = await post_with_retry(
+                self.BUY_API_URL,
+                json_body=buy_data,
+                headers={'Content-Type': 'application/json'}
+            )
 
             if response.status_code != 200:
                 error_msg = f"API error: {response.status_code} - {response.text}"

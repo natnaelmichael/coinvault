@@ -29,6 +29,7 @@ from .config import config
 from .logger import logger
 from .notifications import notification_manager
 from .solana_tx import sign_and_send
+from .pumpportal_api import post_with_retry
 
 
 class TokenMetadata:
@@ -515,12 +516,12 @@ class TokenCreator:
                 f"Sending create payload (mint={mint_address[:8]}…): {create_data}"
             )
 
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(
-                    self.CREATE_TX_URL,
-                    headers={"Content-Type": "application/json"},
-                    content=json.dumps(create_data),
-                )
+            # Retries automatically on transient 502/503 (see pumpportal_api.py)
+            response = await post_with_retry(
+                self.CREATE_TX_URL,
+                headers={"Content-Type": "application/json"},
+                content=json.dumps(create_data).encode(),
+            )
 
             if response.status_code != 200:
                 try:

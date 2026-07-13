@@ -1362,11 +1362,13 @@ class PreloadPane(Container):
     """
 
     _view: str = "list"   # "list" | "form"
+    _editing_index: Optional[int] = None   # None = "New" mode, else index into tokens[]
 
     def compose(self) -> ComposeResult:
         yield Static("💾  Pre-load Token & Launch Later", classes="pane-title")
         with Horizontal(classes="btn-row"):
             yield Button("Pre-load New", id="btn-pl-new")
+            yield Button("Edit Pre-loaded", id="btn-pl-edit")
             yield Button("Launch Pre-loaded", variant="primary", id="btn-pl-launch")
             yield Button("Refresh List", id="btn-pl-refresh")
         yield DataTable(id="pl-table", cursor_type="row")
@@ -1420,13 +1422,51 @@ class PreloadPane(Container):
 
     @on(Button.Pressed, "#btn-pl-new")
     def on_new(self) -> None:
+        for fid in ("pl-name", "pl-symbol", "pl-desc", "pl-image", "pl-ibuy"):
+            self.query_one(f"#{fid}", Input).value = ""
+        self._editing_index = None
         self.query_one("#pl-form").display  = True
         self.query_one("#pl-table").display = False
 
     @on(Button.Pressed, "#btn-pl-cancel")
     def on_cancel(self) -> None:
+        self._editing_index = None
         self.query_one("#pl-form").display  = False
         self.query_one("#pl-table").display = True
+
+    @on(Button.Pressed, "#btn-pl-edit")
+    def on_edit(self) -> None:
+        tbl = self.query_one("#pl-table", DataTable)
+        if tbl.cursor_row is None:
+            self.notify("Select a token row first", severity="warning")
+            return
+        self._load_into_form(tbl.cursor_row)
+
+    def _load_into_form(self, row_idx: int) -> None:
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        if not p.exists():
+            return
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        if row_idx >= len(tokens):
+            return
+        t = tokens[row_idx]
+        self.query_one("#pl-name",   Input).value = t.get("name", "")
+        self.query_one("#pl-symbol", Input).value = t.get("symbol", "")
+        self.query_one("#pl-desc",   Input).value = t.get("description", "")
+        self.query_one("#pl-image",  Input).value = t.get("image_path") or ""
+        self.query_one("#pl-ibuy",   Input).value = str(t.get("initial_buy", 0))
+        if t.get("status") == "launched":
+            self.notify(
+                f"{t.get('symbol')} was already launched — editing only updates "
+                f"the local record, not the on-chain token.",
+                severity="warning",
+            )
+        self._editing_index = row_idx
+        self.query_one("#pl-form").display  = True
+        self.query_one("#pl-table").display = False
 
     @on(Button.Pressed, "#btn-pl-save")
     def on_save(self) -> None:
@@ -1449,16 +1489,31 @@ class PreloadPane(Container):
                 tokens = json.loads(p.read_text())
             except Exception:
                 pass
-        tokens.append({
-            "name": name, "symbol": symbol,
-            "description": _get("pl-desc"),
-            "image_path":  _get("pl-image") or None,
-            "initial_buy": ibuy,
-            "created_at":  datetime.now().isoformat(),
-            "status":      "preloaded",
-        })
+
+        if self._editing_index is not None and self._editing_index < len(tokens):
+            # Update in place — preserve fields the form doesn't show
+            # (status, mint, launched_at, etc. set by a prior launch)
+            # instead of clobbering them with a fresh entry.
+            tokens[self._editing_index].update({
+                "name": name,
+                "symbol": symbol,
+                "description": _get("pl-desc"),
+                "image_path":  _get("pl-image") or None,
+                "initial_buy": ibuy,
+            })
+            self.notify(f"Updated {symbol}", severity="information")
+        else:
+            tokens.append({
+                "name": name, "symbol": symbol,
+                "description": _get("pl-desc"),
+                "image_path":  _get("pl-image") or None,
+                "initial_buy": ibuy,
+                "created_at":  datetime.now().isoformat(),
+                "status":      "preloaded",
+            })
+            self.notify(f"Pre-loaded {symbol}", severity="information")
+
         p.write_text(json.dumps(tokens, indent=2))
-        self.notify(f"Pre-loaded {symbol}", severity="information")
         self.on_cancel()
         self._refresh_list()
 
