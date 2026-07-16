@@ -74,7 +74,7 @@ class TokenCreator:
     """Handles token creation on pump.fun"""
 
     PINATA_UPLOAD_URL  = "https://uploads.pinata.cloud/v3/files"
-    PINATA_GATEWAY_URL = "https://ipfs.io/ipfs"
+    PINATA_GATEWAY_URL = "https://gateway.pinata.cloud/ipfs"
     CREATE_TX_URL      = "https://pumpportal.fun/api/trade-local"
 
     def __init__(self, rpc_client: AsyncClient):
@@ -125,6 +125,18 @@ class TokenCreator:
         docs use, so this mirrors that: upload the image, build the
         metadata JSON referencing the image's IPFS gateway URL, upload that,
         and return the metadata's gateway URL as metadataUri.
+
+        Deliberately uses Pinata's OWN gateway (gateway.pinata.cloud), not a
+        third-party one like ipfs.io. Content is served immediately from
+        Pinata's own storage the moment the upload API confirms the CID —
+        there's no propagation/discovery delay to wait out, because nothing
+        needs to be independently found on the wider IPFS network the way
+        it would via an external gateway. This avoids a real failure mode:
+        PumpPortal's create endpoint appears to validate/fetch the metadata
+        URI before accepting a create request, and an ipfs.io URL requested
+        immediately after upload can 404/timeout if that gateway hasn't
+        caught up yet — which surfaces as an opaque 400 from PumpPortal
+        with no explanation, exactly what showed up in testing.
 
         Requires config.pinata_jwt (a Pinata JWT with upload scope) to be
         set. Get a free key at https://app.pinata.cloud/developers/api-keys
