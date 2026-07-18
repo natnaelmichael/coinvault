@@ -691,7 +691,89 @@ class TokenCreator:
             return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    async def probe_pumpportal(
+        self,
+        creator_wallet,
+        metadata_uri: str,
+        amount: float = 0.0,
+    ) -> dict:
+        """
+        Send a create payload to PumpPortal and return the raw response details
+        WITHOUT signing or broadcasting anything on-chain.
+
+        Use this to verify PumpPortal connectivity and diagnose 400 errors
+        independently of the IPFS upload flow. Pass any metadata_uri you want
+        to test — the returned dict contains the full status, headers, and body
+        so you can see exactly what PumpPortal rejected (or accepted).
+
+        SOL cost: zero — trade-local only builds a transaction; SOL is spent
+        only if you sign and broadcast it, which this method never does.
+        """
+        from solders.keypair import Keypair
+
+        mint_keypair = Keypair()
+        mint_address = str(mint_keypair.pubkey())
+
+        create_data = {
+            "publicKey": str(creator_wallet.public_key),
+            "action":    "create",
+            "tokenMetadata": {
+                "name":   "ProbeToken",
+                "symbol": "PROBE",
+                "uri":    metadata_uri,
+            },
+            "mint":            mint_address,
+            "denominatedInSol": "true",
+            "amount":          amount,
+            "slippage":        10,
+            "priorityFee":     0.0005,
+            "pool":            "pump",
+        }
+
+        logger.info(f"[PROBE] Sending test payload to PumpPortal ({self.CREATE_TX_URL})...")
+        logger.info(f"[PROBE] URI under test: {metadata_uri}")
+        logger.info(f"[PROBE] Amount: {amount} SOL  (nothing will be signed/sent)")
+
+        try:
+            response = await post_with_retry(
+                self.CREATE_TX_URL,
+                headers={"Content-Type": "application/json"},
+                content=json.dumps(create_data).encode(),
+            )
+        except Exception as exc:
+            logger.error(f"[PROBE] Request failed: {exc}")
+            return {"error": str(exc)}
+
+        try:
+            body_json = response.json()
+        except Exception:
+            body_json = None
+
+        result = {
+            "status":       response.status_code,
+            "headers":      dict(response.headers),
+            "body_text":    response.text,
+            "body_json":    body_json,
+            "body_bytes":   response.content,
+            "uri_tested":   metadata_uri,
+            "amount":       amount,
+        }
+
+        if response.status_code == 200:
+            logger.info(
+                f"[PROBE] ✓ PumpPortal returned 200 — connection is healthy. "
+                f"Transaction bytes received ({len(response.content)} bytes). "
+                f"Nothing was signed or sent."
+            )
+        else:
+            logger.error(f"[PROBE] ✗ PumpPortal returned {response.status_code}")
+            logger.error(f"[PROBE]   Body:         {response.text!r}")
+            logger.error(f"[PROBE]   Content-Type: {response.headers.get('content-type', 'n/a')}")
+
+        return result
+
+
 # Module-level singleton
 # ─────────────────────────────────────────────────────────────────────────────
 

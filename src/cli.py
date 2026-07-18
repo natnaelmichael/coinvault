@@ -1487,5 +1487,79 @@ def generate_wallets(count):
     console.print("[bold red]⚠️  Save these private keys securely![/bold red]")
 
 
+@cli.command("probe-pumpportal")
+@click.option(
+    "--uri", "-u", required=True,
+    help="Metadata URI to test (e.g. a previously-pinned IPFS gateway URL).",
+)
+@click.option(
+    "--amount", "-a", default=0.0, show_default=True, type=float,
+    help="Initial buy amount in SOL. Defaults to 0 (safest — skips balance checks).",
+)
+def probe_pumpportal(uri: str, amount: float):
+    """
+    Probe PumpPortal connectivity without spending any SOL.
+
+    Sends a real create payload to the trade-local endpoint using the dev
+    wallet and the provided metadata URI, then prints the full response.
+    The transaction is NEVER signed or broadcast — this is diagnostic-only.
+
+    Examples:\b
+      python3 main.py probe-pumpportal --uri https://gateway.pinata.cloud/ipfs/bafkrei...
+      python3 main.py probe-pumpportal --uri https://ipfs.io/ipfs/bafkrei... --amount 0
+    """
+    import asyncio
+    from solana.rpc.async_api import AsyncClient
+
+    async def _run():
+        rpc = AsyncClient(config.rpc_url)
+        try:
+            dev_wallet = wallet_manager.get_dev_wallet()
+            if not dev_wallet:
+                console.print("[red]❌  DEV_WALLET_PRIVATE_KEY is not set in .env[/red]")
+                return
+
+            creator = get_token_creator(rpc)
+            result = await creator.probe_pumpportal(dev_wallet, uri, amount=amount)
+
+            console.print()
+            if "error" in result:
+                console.print(Panel(
+                    f"[red]Request-level error:[/red] {result['error']}",
+                    title="[bold red]PROBE FAILED[/bold red]",
+                    border_style="red",
+                ))
+                return
+
+            status = result["status"]
+            color  = "green" if status == 200 else "red"
+            icon   = "✓" if status == 200 else "✗"
+
+            lines = [
+                f"[bold]Status:[/bold]        [{color}]{status}[/{color}]",
+                f"[bold]URI tested:[/bold]    {result['uri_tested']}",
+                f"[bold]Amount:[/bold]        {result['amount']} SOL",
+                f"[bold]Content-Type:[/bold]  {result['headers'].get('content-type', 'n/a')}",
+                f"[bold]Body (text):[/bold]   {result['body_text']!r}",
+            ]
+            if result["body_json"] is not None:
+                lines.append(f"[bold]Body (JSON):[/bold]   {result['body_json']}")
+            if status == 200:
+                lines.append(
+                    f"\n[green]Transaction bytes received: {len(result['body_bytes'])} bytes.[/green]"
+                    f"\n[dim]Nothing was signed or sent — this is safe.[/dim]"
+                )
+
+            console.print(Panel(
+                "\n".join(lines),
+                title=f"[bold {color}]{icon}  PUMPPORTAL PROBE  (HTTP {status})[/bold {color}]",
+                border_style=color,
+            ))
+        finally:
+            await rpc.close()
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     cli()
