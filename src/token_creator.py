@@ -404,63 +404,109 @@ class TokenCreator:
         self, cid: str, label: str = "", gateway_base: str = "https://ipfs.io/ipfs"
     ) -> bool:
         """
-        Stage 2: Poll <gateway_base>/<CID> until the content is reachable
-        from the public internet, or until the configured timeout.
+        Poll public IPFS gateways until the content is reachable, or timeout.
 
-        gateway_base defaults to ipfs.io (the local-IPFS-mode behavior,
-        unchanged). The Pinata backend passes its own gateway instead,
-        since that's the one PumpPortal will actually be fetching from.
+        Tries the requested gateway first, then falls back to alternates if DNS
+        resolution fails (Errno 8 / gaierror) — this handles networks where one
+        gateway is blocked but others are reachable. If *every* gateway fails
+        DNS on the first attempt (i.e. the local machine has no route to any of
+        them), verification is skipped with a warning and a fixed propagation
+        delay: PumpPortal's servers can typically reach ipfs.io fine even when
+        the local machine cannot.
 
-        Returns True if the gateway responds with HTTP < 400, False on timeout.
+        Returns True on success or DNS-unreachable skip, False on HTTP timeout.
         """
-        gateway_url = f"{gateway_base}/{cid}"
+        import socket
+
+        # Build the gateway list: requested one first, then public fallbacks
+        # (deduplicated while preserving order).
+        fallbacks = [
+            "https://ipfs.io/ipfs",
+            "https://cloudflare-ipfs.com/ipfs",
+            "https://dweb.link/ipfs",
+        ]
+        gateways: list[str] = [gateway_base] + [g for g in fallbacks if g != gateway_base]
+
         timeout  = config.ipfs_gateway_timeout
         interval = config.ipfs_gateway_poll_interval
-        elapsed  = 0.0
-        attempt  = 0
-
-        logger.info(
-            f"  ⏳ Polling gateway for {label or cid[:16]} "
-            f"(timeout: {timeout}s, every {interval}s)..."
-        )
 
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            while elapsed < timeout:
-                attempt += 1
-                try:
-                    resp = await client.head(gateway_url)
-                    if resp.status_code < 400:
+            for gw in gateways:
+                gateway_url = f"{gw}/{cid}"
+                elapsed = 0.0
+                attempt = 0
+                dns_ok  = None   # None = untested, True/False after first attempt
+
+                logger.info(
+                    f"  ⏳ Polling {gw} for {label or cid[:16]} "
+                    f"(timeout: {timeout}s, every {interval}s)..."
+                )
+
+                while elapsed < timeout:
+                    attempt += 1
+                    try:
+                        resp = await client.head(gateway_url)
+                        dns_ok = True
+                        if resp.status_code < 400:
+                            logger.info(
+                                f"  ✓ {label} live on gateway after {elapsed:.0f}s "
+                                f"(HTTP {resp.status_code}) — {gateway_url}"
+                            )
+                            return True
                         logger.info(
-                            f"  ✓ {label} live on gateway after {elapsed:.0f}s "
-                            f"(HTTP {resp.status_code}) — {gateway_url}"
+                            f"  [{attempt}] HTTP {resp.status_code} — "
+                            f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
                         )
-                        return True
-                    logger.info(
-                        f"  [{attempt}] HTTP {resp.status_code} — "
-                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
-                    )
-                except httpx.TimeoutException:
-                    logger.info(
-                        f"  [{attempt}] Gateway timeout — "
-                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
-                    )
-                except Exception as e:
-                    logger.info(
-                        f"  [{attempt}] {e} — "
-                        f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
-                    )
+                    except httpx.TimeoutException:
+                        dns_ok = True
+                        logger.info(
+                            f"  [{attempt}] Gateway timeout — "
+                            f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                        )
+                    except (socket.gaierror, httpx.ConnectError) as e:
+                        if dns_ok is None:
+                            # First attempt already failed DNS — this gateway is
+                            # unreachable from this machine. Move to next fallback.
+                            logger.warning(
+                                f"  ⚠ DNS/connect failure for {gw} ({e}) — "
+                                f"trying next gateway..."
+                            )
+                            break
+                        logger.info(
+                            f"  [{attempt}] {e} — "
+                            f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                        )
+                    except Exception as e:
+                        logger.info(
+                            f"  [{attempt}] {e} — "
+                            f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
+                        )
 
-                wait = min(interval, timeout - elapsed)
-                if wait <= 0:
-                    break
-                await asyncio.sleep(wait)
-                elapsed += wait
+                    wait = min(interval, timeout - elapsed)
+                    if wait <= 0:
+                        break
+                    await asyncio.sleep(wait)
+                    elapsed += wait
 
-        logger.error(
-            f"  ✗ Gateway verification timed out after {timeout}s for "
-            f"{label} — {gateway_url}"
+                else:
+                    # While loop exhausted timeout on this gateway — it's reachable
+                    # (dns_ok is True) but content never appeared. Hard failure.
+                    logger.error(
+                        f"  ✗ Gateway verification timed out after {timeout}s for "
+                        f"{label} — {gateway_url}"
+                    )
+                    return False
+
+        # Every gateway failed DNS — local network can't reach any public IPFS
+        # gateway. Skip verification and use a fixed delay instead.
+        fixed_delay = 20
+        logger.warning(
+            f"  ⚠ All IPFS gateways unreachable from this machine "
+            f"(DNS failure). Waiting {fixed_delay}s for propagation and "
+            f"proceeding — PumpPortal's servers should be able to fetch the URI."
         )
-        return False
+        await asyncio.sleep(fixed_delay)
+        return True
 
     # ─────────────────────────────────────────────────────────────────────────
     # Shared helpers
