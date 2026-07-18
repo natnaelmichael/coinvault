@@ -211,6 +211,27 @@ class TokenCreator:
 
             meta_cid = meta_resp.json()["data"]["cid"]
             metadata_uri = f"{self.PINATA_GATEWAY_URL}/{meta_cid}"
+            logger.info(f"  ✓ Metadata CID: {meta_cid}")
+
+            # Stage 2 — gateway verification. Pinata's upload API confirming
+            # the pin doesn't guarantee gateway.pinata.cloud (a shared,
+            # cached gateway) can already serve it — that gap is exactly
+            # what produced the 400 from PumpPortal (it fetches this URI
+            # to validate before accepting a create request). Reuses the
+            # same poll-until-reachable helper the local IPFS backend uses,
+            # just pointed at Pinata's gateway instead of ipfs.io.
+            if config.ipfs_gateway_verify:
+                logger.info("[PINATA] Verifying metadata is live on gateway before proceeding...")
+                ok = await self._verify_on_gateway(
+                    meta_cid, label="metadata", gateway_base=self.PINATA_GATEWAY_URL
+                )
+                if not ok:
+                    logger.error(
+                        "[PINATA] ✗ Metadata not reachable on gateway within "
+                        f"{config.ipfs_gateway_timeout}s — transaction aborted."
+                    )
+                    return None
+
             logger.info(f"✓ Pinata upload complete — URI: {metadata_uri}")
             return {"metadataUri": metadata_uri}
 
@@ -384,15 +405,19 @@ class TokenCreator:
             logger.warning(f"  ⚠ DHT provide warning for {label} (non-fatal): {e}")
 
     async def _verify_on_gateway(
-        self, cid: str, label: str = ""
+        self, cid: str, label: str = "", gateway_base: str = "https://ipfs.io/ipfs"
     ) -> bool:
         """
-        Stage 2: Poll https://ipfs.io/ipfs/<CID> until the content is
-        reachable from the public internet, or until the configured timeout.
+        Stage 2: Poll <gateway_base>/<CID> until the content is reachable
+        from the public internet, or until the configured timeout.
+
+        gateway_base defaults to ipfs.io (the local-IPFS-mode behavior,
+        unchanged). The Pinata backend passes its own gateway instead,
+        since that's the one PumpPortal will actually be fetching from.
 
         Returns True if the gateway responds with HTTP < 400, False on timeout.
         """
-        gateway_url = f"https://ipfs.io/ipfs/{cid}"
+        gateway_url = f"{gateway_base}/{cid}"
         timeout  = config.ipfs_gateway_timeout
         interval = config.ipfs_gateway_poll_interval
         elapsed  = 0.0

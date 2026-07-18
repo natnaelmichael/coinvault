@@ -136,7 +136,8 @@ class Config:
         self.ipfs_mode = os.getenv("IPFS_MODE", "pumpfun").lower()
         self.ipfs_local_api = os.getenv("IPFS_LOCAL_API", "http://127.0.0.1:5001")
 
-        # Stage 2 gateway verification settings (local mode only)
+        # Stage 2 gateway verification settings — used by both IPFS backends
+        # (local daemon mode polls ipfs.io; Pinata mode polls gateway.pinata.cloud)
         # Set IPFS_GATEWAY_VERIFY=false to skip the gateway check (not recommended)
         self.ipfs_gateway_verify = os.getenv("IPFS_GATEWAY_VERIFY", "true").lower() == "true"
         # How many seconds to wait for the content to appear on the public gateway
