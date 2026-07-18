@@ -1,0 +1,25 @@
+2026-07-17 22:16:12 | INFO     | PumpFunBot | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_221612.log
+2026-07-17 22:16:12 | WARNING  | PumpFunBot | plyer not available - desktop notifications disabled
+2026-07-17 22:16:12 | WARNING  | PumpFunBot | pygame not available - sound alerts disabled
+2026-07-17 22:16:18 | INFO     | PumpFunBot | Creating token: Kozy Kabin (KOZY)
+2026-07-17 22:16:18 | INFO     | PumpFunBot | Uploading metadata for Kozy Kabin (KOZY) [mode: pumpfun]...
+2026-07-17 22:16:18 | INFO     | PumpFunBot | [PINATA] Uploading image: coinvaultlogo.jpeg (31,518 bytes)...
+2026-07-17 22:16:21 | INFO     | PumpFunBot |   ✓ Image CID: bafkreigrqvpmk6zqol2jitgfyte76tvlnmdz3dwj5xlwjm7uqfa2tghu5u
+2026-07-17 22:16:21 | INFO     | PumpFunBot | [PINATA] Verifying image is live on gateway...
+2026-07-17 22:16:21 | INFO     | PumpFunBot |   ⏳ Polling https://gateway.pinata.cloud/ipfs for image (timeout: 90s, every 0.5s)...
+2026-07-17 22:16:27 | INFO     | PumpFunBot |   ✓ image live on gateway after 0s (HTTP 200) — https://gateway.pinata.cloud/ipfs/bafkreigrqvpmk6zqol2jitgfyte76tvlnmdz3dwj5xlwjm7uqfa2tghu5u
+2026-07-17 22:16:27 | INFO     | PumpFunBot | [PINATA] Uploading metadata JSON (218 bytes)...
+2026-07-17 22:16:28 | INFO     | PumpFunBot |   ✓ Metadata CID: bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 22:16:28 | INFO     | PumpFunBot | [PINATA] Verifying metadata is live on gateway before proceeding...
+2026-07-17 22:16:28 | INFO     | PumpFunBot |   ⏳ Polling https://gateway.pinata.cloud/ipfs for metadata (timeout: 90s, every 0.5s)...
+2026-07-17 22:16:32 | INFO     | PumpFunBot |   ✓ metadata live on gateway after 0s (HTTP 200) — https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 22:16:32 | INFO     | PumpFunBot | ✓ Pinata upload complete — URI: https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 22:16:32 | INFO     | PumpFunBot | Token mint address: GatDhjdDSeKFLaWS5qHAT81yPWD2srhqfWRVL1Mfyu3z
+2026-07-17 22:16:32 | DEBUG    | PumpFunBot | Sending create payload (mint=GatDhjdD…): {'publicKey': '6XBWSuqRRv1fk2jSxVNiviSk8pwiUaoL1Lz1ThWPbtoz', 'action': 'create', 'tokenMetadata': {'name': 'Kozy Kabin', 'symbol': 'KOZY', 'uri': 'https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4'}, 'mint': 'GatDhjdDSeKFLaWS5qHAT81yPWD2srhqfWRVL1Mfyu3z', 'denominatedInSol': 'true', 'amount': 2.5, 'slippage': 5, 'priorityFee': 0.0005, 'pool': 'pump'}
+2026-07-17 22:16:32 | ERROR    | PumpFunBot | PumpPortal create failed 400: Bad Request
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   URI sent to PumpPortal:  https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   Mint:                    GatDhjdDSeKFLaWS5qHAT81yPWD2srhqfWRVL1Mfyu3z
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   Amount:                  2.5 SOL
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   Slippage:                5%
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   Content-Type header:     text/plain; charset=utf-8
+2026-07-17 22:16:32 | ERROR    | PumpFunBot |   Raw response bytes:      b'Bad Request'
