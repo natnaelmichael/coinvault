@@ -143,7 +143,7 @@ class Config:
         # How many seconds to wait for the content to appear on the public gateway
         self.ipfs_gateway_timeout = int(os.getenv("IPFS_GATEWAY_TIMEOUT", "90"))
         # How often to re-check (seconds between polls)
-        self.ipfs_gateway_poll_interval = float(os.getenv("IPFS_GATEWAY_POLL_INTERVAL", "6"))
+        self.ipfs_gateway_poll_interval = float(os.getenv("IPFS_GATEWAY_POLL_INTERVAL", "0.5"))
 
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
