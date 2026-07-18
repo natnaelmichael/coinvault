@@ -177,7 +177,7 @@ class TokenCreator:
                 return None
 
             image_cid = image_resp.json()["data"]["cid"]
-            image_url = f"{self.PINATA_GATEWAY_URL}/{image_cid}"
+            image_url = f"https://ipfs.io/ipfs/{image_cid}"
             logger.info(f"  ✓ Image CID: {image_cid}")
 
             metadata_doc: Dict[str, Any] = {
@@ -210,20 +210,16 @@ class TokenCreator:
                 return None
 
             meta_cid = meta_resp.json()["data"]["cid"]
-            metadata_uri = f"{self.PINATA_GATEWAY_URL}/{meta_cid}"
+            metadata_uri = f"https://ipfs.io/ipfs/{meta_cid}"
             logger.info(f"  ✓ Metadata CID: {meta_cid}")
 
-            # Stage 2 — gateway verification. Pinata's upload API confirming
-            # the pin doesn't guarantee gateway.pinata.cloud (a shared,
-            # cached gateway) can already serve it — that gap is exactly
-            # what produced the 400 from PumpPortal (it fetches this URI
-            # to validate before accepting a create request). Reuses the
-            # same poll-until-reachable helper the local IPFS backend uses,
-            # just pointed at Pinata's gateway instead of ipfs.io.
+            # Stage 2 — verify on ipfs.io, which is the exact URL PumpPortal
+            # will fetch when it validates the create request. Pinata's own
+            # gateway returning 200 doesn't help if PumpPortal can't reach it.
             if config.ipfs_gateway_verify:
                 logger.info("[PINATA] Verifying metadata is live on gateway before proceeding...")
                 ok = await self._verify_on_gateway(
-                    meta_cid, label="metadata", gateway_base=self.PINATA_GATEWAY_URL
+                    meta_cid, label="metadata"
                 )
                 if not ok:
                     logger.error(

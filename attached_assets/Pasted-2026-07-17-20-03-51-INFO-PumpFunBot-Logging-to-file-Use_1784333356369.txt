@@ -1,0 +1,16 @@
+2026-07-17 20:03:51 | INFO     | PumpFunBot | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_200351.log
+2026-07-17 20:03:51 | WARNING  | PumpFunBot | plyer not available - desktop notifications disabled
+2026-07-17 20:03:51 | WARNING  | PumpFunBot | pygame not available - sound alerts disabled
+2026-07-17 20:04:01 | INFO     | PumpFunBot | Creating token: Kozy Kabin (KOZY)
+2026-07-17 20:04:01 | INFO     | PumpFunBot | Uploading metadata for Kozy Kabin (KOZY) [mode: pumpfun]...
+2026-07-17 20:04:01 | INFO     | PumpFunBot | [PINATA] Uploading image: coinvaultlogo.jpeg (31,518 bytes)...
+2026-07-17 20:04:03 | INFO     | PumpFunBot |   ✓ Image CID: bafkreigrqvpmk6zqol2jitgfyte76tvlnmdz3dwj5xlwjm7uqfa2tghu5u
+2026-07-17 20:04:03 | INFO     | PumpFunBot | [PINATA] Uploading metadata JSON (218 bytes)...
+2026-07-17 20:04:05 | INFO     | PumpFunBot |   ✓ Metadata CID: bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 20:04:05 | INFO     | PumpFunBot | [PINATA] Verifying metadata is live on gateway before proceeding...
+2026-07-17 20:04:05 | INFO     | PumpFunBot |   ⏳ Polling gateway for metadata (timeout: 90s, every 6.0s)...
+2026-07-17 20:04:11 | INFO     | PumpFunBot |   ✓ metadata live on gateway after 0s (HTTP 200) — https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 20:04:11 | INFO     | PumpFunBot | ✓ Pinata upload complete — URI: https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+2026-07-17 20:04:11 | INFO     | PumpFunBot | Token mint address: FWq7kjnwSNdszAbdDtxLtWbF86NFhZLDCLw8ecA6a7WN
+2026-07-17 20:04:11 | DEBUG    | PumpFunBot | Sending create payload (mint=FWq7kjnw…): {'publicKey': '6XBWSuqRRv1fk2jSxVNiviSk8pwiUaoL1Lz1ThWPbtoz', 'action': 'create', 'tokenMetadata': {'name': 'Kozy Kabin', 'symbol': 'KOZY', 'uri': 'https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4'}, 'mint': 'FWq7kjnwSNdszAbdDtxLtWbF86NFhZLDCLw8ecA6a7WN', 'denominatedInSol': 'true', 'amount': 2.5, 'slippage': 5, 'priorityFee': 0.0005, 'pool': 'pump'}
+2026-07-17 20:04:11 | ERROR    | PumpFunBot | PumpPortal create failed 400: Bad Request
