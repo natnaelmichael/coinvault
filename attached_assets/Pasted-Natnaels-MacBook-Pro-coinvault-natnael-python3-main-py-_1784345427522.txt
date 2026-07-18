@@ -1,0 +1,55 @@
+Natnaels-MacBook-Pro:coinvault natnael$ python3 main.py probe-pumpportal \
+>   --uri https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:29:01 | INFO     | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_232901.log
+23:29:01 | WARNING  | plyer not available - desktop notifications disabled
+23:29:01 | WARNING  | pygame not available - sound alerts disabled
+Traceback (most recent call last):
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/main.py", line 24, in <module>
+    cli()
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1161, in __call__
+    return self.main(*args, **kwargs)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1082, in main
+    rv = self.invoke(ctx)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1697, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1443, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 788, in invoke
+    return __callback(*args, **kwargs)
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/src/cli.py", line 1561, in probe_pumpportal
+    asyncio.run(_run())
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 642, in run_until_complete
+    return future.result()
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/src/cli.py", line 1517, in _run
+    dev_wallet = wallet_manager.get_dev_wallet()
+AttributeError: 'WalletManager' object has no attribute 'get_dev_wallet'
+Natnaels-MacBook-Pro:coinvault natnael$ python3 main.py probe-pumpportal \
+>   --uri https://ipfs.io/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:29:35 | INFO     | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_232935.log
+23:29:35 | WARNING  | plyer not available - desktop notifications disabled
+23:29:35 | WARNING  | pygame not available - sound alerts disabled
+Traceback (most recent call last):
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/main.py", line 24, in <module>
+    cli()
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1161, in __call__
+    return self.main(*args, **kwargs)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1082, in main
+    rv = self.invoke(ctx)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1697, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 1443, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+  File "/Users/natnael/Library/Python/3.9/lib/python/site-packages/click/core.py", line 788, in invoke
+    return __callback(*args, **kwargs)
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/src/cli.py", line 1561, in probe_pumpportal
+    asyncio.run(_run())
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 642, in run_until_complete
+    return future.result()
+  File "/Users/natnael/Youtube Projects/coinvault/coinvault/src/cli.py", line 1517, in _run
+    dev_wallet = wallet_manager.get_dev_wallet()
+AttributeError: 'WalletManager' object has no attribute 'get_dev_wallet'
+Natnaels-MacBook-Pro:coinvault natnael$ 

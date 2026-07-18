@@ -1514,7 +1514,8 @@ def probe_pumpportal(uri: str, amount: float):
     async def _run():
         rpc = AsyncClient(config.rpc_url)
         try:
-            dev_wallet = wallet_manager.get_dev_wallet()
+            await wallet_manager.initialize()
+            dev_wallet = wallet_manager.dev_wallet
             if not dev_wallet:
                 console.print("[red]❌  DEV_WALLET_PRIVATE_KEY is not set in .env[/red]")
                 return
