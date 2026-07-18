@@ -1,0 +1,28 @@
+Proposed fix (not applied yet — you said plan first)
+Two changes to token_creator.py, both in the same spirit as before: make verification and usage structurally impossible to desync.
+a) _verify_on_gateway returns the winning URL, not a bool:
+pythonasync def _verify_on_gateway(
+    self, cid: str, label: str = "", gateway_base: str = "https://ipfs.io/ipfs"
+) -> Optional[str]:
+    """
+    Poll gateway_base first, then public fallbacks. Returns the exact URL
+    that responded successfully, or None if every gateway failed/timed out.
+    Callers must use the returned URL directly — reconstructing a URL
+    separately is exactly what caused the ipfs.io/dweb.link mismatch.
+    """
+    ...
+    if resp.status_code < 400:
+        return f"{gw}/{cid}"     # was: return True
+    ...
+    return None                  # was: return False
+b) The call site uses that return value as-is, and passes Pinata's gateway back in as the first thing tried:
+pythonverified_uri = await self._verify_on_gateway(
+    meta_cid, label="metadata", gateway_base=self.PINATA_GATEWAY_URL
+)
+if not verified_uri:
+    logger.error(f"[PINATA] ✗ Metadata not reachable on any gateway — transaction aborted.")
+    return None
+metadata_uri = verified_uri      # exactly what passed is exactly what's sent
+This keeps the multi-gateway resilience (useful, given your Mac's DNS hiccup tonight), restores Pinata's own gateway as the first and fastest check, and makes it structurally impossible for the sent URI to differ from the verified one going forward.
+One more thing worth a decision, not urgent: the current "if every gateway fails DNS, skip verification, sleep 20s, and assume success" fallback silently fabricates a pass without checking anything. Didn't fire tonight (dweb.link worked), but it's a soft spot — want it to stay optimistic like that, or fail loudly instead if you'd rather know?
+Separately, still unverified: we still haven't isolated whether amount: 2.5 / slippage: 5 might also be contributing — the URI bug kept getting in the way first. Once the above is fixed, if it still 400s, that's the next thing to test in isolation.

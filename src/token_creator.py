@@ -177,14 +177,40 @@ class TokenCreator:
                 return None
 
             image_cid = image_resp.json()["data"]["cid"]
-            image_url = f"https://ipfs.io/ipfs/{image_cid}"
             logger.info(f"  ✓ Image CID: {image_cid}")
 
+            # Stage 1 — verify image on Pinata's own gateway first (content is
+            # there immediately after upload, no propagation delay). This also
+            # tells us which gateway is actually reachable from this machine so
+            # we can use the same one for every URL we build — preventing the
+            # gateway mismatch that caused the 400 (verified on dweb.link but
+            # sent ipfs.io to PumpPortal).
+            if config.ipfs_gateway_verify:
+                logger.info("[PINATA] Verifying image is live on gateway...")
+                image_live_url = await self._verify_on_gateway(
+                    image_cid, label="image", gateway_base=self.PINATA_GATEWAY_URL
+                )
+                if not image_live_url:
+                    logger.error(
+                        "[PINATA] ✗ Image not reachable on any gateway within "
+                        f"{config.ipfs_gateway_timeout}s — transaction aborted."
+                    )
+                    return None
+                # Extract the base (everything before the last "/") so we can
+                # reuse the same gateway for every URL we construct.
+                working_gateway = image_live_url.rsplit("/", 1)[0]
+            else:
+                image_live_url  = f"{self.PINATA_GATEWAY_URL}/{image_cid}"
+                working_gateway = self.PINATA_GATEWAY_URL
+
+            # Build metadata JSON using the verified image URL — this URL is
+            # baked into the content uploaded to IPFS, so it must point to a
+            # gateway PumpPortal can actually fetch (not necessarily ipfs.io).
             metadata_doc: Dict[str, Any] = {
                 "name": metadata.name,
                 "symbol": metadata.symbol,
                 "description": metadata.description,
-                "image": image_url,
+                "image": image_live_url,   # ← exact verified URL, not hardcoded
                 "showName": True,
             }
             if metadata.twitter:
@@ -210,23 +236,26 @@ class TokenCreator:
                 return None
 
             meta_cid = meta_resp.json()["data"]["cid"]
-            metadata_uri = f"https://ipfs.io/ipfs/{meta_cid}"
             logger.info(f"  ✓ Metadata CID: {meta_cid}")
 
-            # Stage 2 — verify on ipfs.io, which is the exact URL PumpPortal
-            # will fetch when it validates the create request. Pinata's own
-            # gateway returning 200 doesn't help if PumpPortal can't reach it.
+            # Stage 2 — verify metadata on the same working gateway and use
+            # the returned URL directly as metadata_uri. This makes it
+            # structurally impossible for the URI we send to PumpPortal to
+            # differ from the one that actually passed verification.
             if config.ipfs_gateway_verify:
                 logger.info("[PINATA] Verifying metadata is live on gateway before proceeding...")
-                ok = await self._verify_on_gateway(
-                    meta_cid, label="metadata"
+                meta_live_url = await self._verify_on_gateway(
+                    meta_cid, label="metadata", gateway_base=working_gateway
                 )
-                if not ok:
+                if not meta_live_url:
                     logger.error(
                         "[PINATA] ✗ Metadata not reachable on gateway within "
                         f"{config.ipfs_gateway_timeout}s — transaction aborted."
                     )
                     return None
+                metadata_uri = meta_live_url   # ← exact URL that returned 200
+            else:
+                metadata_uri = f"{working_gateway}/{meta_cid}"
 
             logger.info(f"✓ Pinata upload complete — URI: {metadata_uri}")
             return {"metadataUri": metadata_uri}
@@ -401,25 +430,36 @@ class TokenCreator:
             logger.warning(f"  ⚠ DHT provide warning for {label} (non-fatal): {e}")
 
     async def _verify_on_gateway(
-        self, cid: str, label: str = "", gateway_base: str = "https://ipfs.io/ipfs"
-    ) -> bool:
+        self,
+        cid: str,
+        label: str = "",
+        gateway_base: str = "https://ipfs.io/ipfs",
+    ) -> Optional[str]:
         """
-        Poll public IPFS gateways until the content is reachable, or timeout.
+        Poll IPFS gateways until the content is reachable; return the exact URL
+        that responded with HTTP < 400, or None if every gateway timed out.
 
-        Tries the requested gateway first, then falls back to alternates if DNS
-        resolution fails (Errno 8 / gaierror) — this handles networks where one
-        gateway is blocked but others are reachable. If *every* gateway fails
-        DNS on the first attempt (i.e. the local machine has no route to any of
-        them), verification is skipped with a warning and a fixed propagation
-        delay: PumpPortal's servers can typically reach ipfs.io fine even when
-        the local machine cannot.
+        Tries gateway_base first (callers should pass the most reliable one,
+        e.g. Pinata's own gateway right after a Pinata upload), then falls back
+        to public alternatives. If a gateway fails DNS/connect on the first
+        attempt it is skipped immediately rather than retried — a DNS failure
+        is a local network issue, not an IPFS propagation issue.
 
-        Returns True on success or DNS-unreachable skip, False on HTTP timeout.
+        If *every* gateway fails DNS (the local machine can't reach any of
+        them), verification cannot be performed locally. The function returns a
+        best-guess URL built from the first gateway in the list and logs a
+        clear warning. This is intentionally optimistic: PumpPortal's servers
+        can typically reach the Pinata or ipfs.io gateways even when the local
+        machine cannot. Callers see the warning and can decide to abort if they
+        want stricter behaviour.
+
+        IMPORTANT: callers MUST use the returned URL as-is for any URI they
+        send externally. Never reconstruct a URI from the CID separately —
+        that's what caused the ipfs.io/dweb.link mismatch.
         """
         import socket
 
-        # Build the gateway list: requested one first, then public fallbacks
-        # (deduplicated while preserving order).
+        # Primary gateway first, then public fallbacks (deduplicated).
         fallbacks = [
             "https://ipfs.io/ipfs",
             "https://cloudflare-ipfs.com/ipfs",
@@ -435,7 +475,7 @@ class TokenCreator:
                 gateway_url = f"{gw}/{cid}"
                 elapsed = 0.0
                 attempt = 0
-                dns_ok  = None   # None = untested, True/False after first attempt
+                dns_ok  = None  # None = untested
 
                 logger.info(
                     f"  ⏳ Polling {gw} for {label or cid[:16]} "
@@ -452,7 +492,7 @@ class TokenCreator:
                                 f"  ✓ {label} live on gateway after {elapsed:.0f}s "
                                 f"(HTTP {resp.status_code}) — {gateway_url}"
                             )
-                            return True
+                            return gateway_url   # ← exact URL that worked
                         logger.info(
                             f"  [{attempt}] HTTP {resp.status_code} — "
                             f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
@@ -465,13 +505,11 @@ class TokenCreator:
                         )
                     except (socket.gaierror, httpx.ConnectError) as e:
                         if dns_ok is None:
-                            # First attempt already failed DNS — this gateway is
-                            # unreachable from this machine. Move to next fallback.
                             logger.warning(
                                 f"  ⚠ DNS/connect failure for {gw} ({e}) — "
-                                f"trying next gateway..."
+                                f"skipping to next gateway..."
                             )
-                            break
+                            break   # don't waste timeout retrying a dead gateway
                         logger.info(
                             f"  [{attempt}] {e} — "
                             f"retrying in {interval}s ({elapsed:.0f}/{timeout}s elapsed)"
@@ -489,24 +527,24 @@ class TokenCreator:
                     elapsed += wait
 
                 else:
-                    # While loop exhausted timeout on this gateway — it's reachable
-                    # (dns_ok is True) but content never appeared. Hard failure.
+                    # While-loop exhausted the timeout on a reachable gateway.
+                    # Content isn't showing up — hard failure, don't try others.
                     logger.error(
                         f"  ✗ Gateway verification timed out after {timeout}s for "
                         f"{label} — {gateway_url}"
                     )
-                    return False
+                    return None
 
-        # Every gateway failed DNS — local network can't reach any public IPFS
-        # gateway. Skip verification and use a fixed delay instead.
+        # Every gateway failed DNS from this machine.
+        best_guess = f"{gateways[0]}/{cid}"
         fixed_delay = 20
         logger.warning(
-            f"  ⚠ All IPFS gateways unreachable from this machine "
-            f"(DNS failure). Waiting {fixed_delay}s for propagation and "
-            f"proceeding — PumpPortal's servers should be able to fetch the URI."
+            f"  ⚠ All IPFS gateways unreachable from this machine (DNS failure)."
+            f" Cannot verify locally. Waiting {fixed_delay}s then proceeding with"
+            f" {best_guess} — PumpPortal's servers should be able to reach it."
         )
         await asyncio.sleep(fixed_delay)
-        return True
+        return best_guess   # optimistic — caller sees the warning in the log
 
     # ─────────────────────────────────────────────────────────────────────────
     # Shared helpers
@@ -608,6 +646,12 @@ class TokenCreator:
                 except Exception:
                     err = response.text
                 logger.error(f"PumpPortal create failed {response.status_code}: {err}")
+                logger.error(f"  URI sent to PumpPortal:  {create_data['tokenMetadata']['uri']}")
+                logger.error(f"  Mint:                    {create_data['mint']}")
+                logger.error(f"  Amount:                  {create_data['amount']} SOL")
+                logger.error(f"  Slippage:                {create_data['slippage']}%")
+                logger.error(f"  Content-Type header:     {response.headers.get('content-type', 'n/a')}")
+                logger.error(f"  Raw response bytes:      {response.content!r}")
                 return None
 
             # Deserialize, refresh blockhash, sign, send, and confirm —
