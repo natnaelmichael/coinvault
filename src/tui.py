@@ -1367,10 +1367,11 @@ class PreloadPane(Container):
     def compose(self) -> ComposeResult:
         yield Static("💾  Pre-load Token & Launch Later", classes="pane-title")
         with Horizontal(classes="btn-row"):
-            yield Button("Pre-load New", id="btn-pl-new")
-            yield Button("Edit Pre-loaded", id="btn-pl-edit")
+            yield Button("Pre-load New",     id="btn-pl-new")
             yield Button("Launch Pre-loaded", variant="primary", id="btn-pl-launch")
-            yield Button("Refresh List", id="btn-pl-refresh")
+            yield Button("Edit Pre-loaded",  id="btn-pl-edit")
+            yield Button("Delete Pre-loaded", variant="error",  id="btn-pl-delete")
+            yield Button("Refresh List",     id="btn-pl-refresh")
         yield DataTable(id="pl-table", cursor_type="row")
         with Container(id="pl-form"):
             for fid, label, ph in [
@@ -1418,6 +1419,30 @@ class PreloadPane(Container):
 
     @on(Button.Pressed, "#btn-pl-refresh")
     def on_refresh(self) -> None:
+        self._refresh_list()
+
+    @on(Button.Pressed, "#btn-pl-delete")
+    def on_delete(self) -> None:
+        tbl = self.query_one("#pl-table", DataTable)
+        if tbl.cursor_row is None:
+            self.notify("Select a token row first", severity="warning")
+            return
+        p = _PROJECT_ROOT / "data" / "preloaded_tokens.json"
+        if not p.exists():
+            return
+        try:
+            tokens = json.loads(p.read_text())
+        except Exception:
+            return
+        row_idx = tbl.cursor_row
+        if row_idx >= len(tokens):
+            return
+        removed = tokens.pop(row_idx)
+        p.write_text(json.dumps(tokens, indent=2))
+        self.notify(
+            f"Deleted {removed.get('name', '?')} ({removed.get('symbol', '?')})",
+            severity="information",
+        )
         self._refresh_list()
 
     @on(Button.Pressed, "#btn-pl-new")
