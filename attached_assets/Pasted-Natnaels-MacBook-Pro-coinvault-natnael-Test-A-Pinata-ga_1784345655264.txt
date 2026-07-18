@@ -1,0 +1,118 @@
+Natnaels-MacBook-Pro:coinvault natnael$ # Test A — Pinata gateway
+Natnaels-MacBook-Pro:coinvault natnael$ python3 main.py probe-pumpportal \
+>   --uri https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:32:29 | INFO     | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_233229.log
+23:32:29 | WARNING  | plyer not available - desktop notifications disabled
+23:32:29 | WARNING  | pygame not available - sound alerts disabled
+Initializing Wallet Manager...
+✓ Dev wallet loaded: 6XBWSuqRRv1f...
+✓ Fund wallet 1 loaded: BANP1fBbsjNn...
+✓ Fund wallet 2 loaded: 5myFfY5Bhg4e...
+✓ Fund wallet 3 loaded: 6FLZ9p6tQBmb...
+✓ Fund wallet 4 loaded: 3EwJw8SXhc6a...
+✓ Fund wallet 5 loaded: H58pPr4DfHrP...
+✓ Loaded 5 fund wallet(s)
+23:32:29 | INFO     | [PROBE] Sending test payload to PumpPortal (https://pumpportal.fun/api/trade-local)...
+23:32:29 | INFO     | [PROBE] URI under test: https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:32:29 | INFO     | [PROBE] Amount: 0.0 SOL  (nothing will be signed/sent)
+23:32:30 | INFO     | [PROBE] ✓ PumpPortal returned 200 — connection is healthy. Transaction bytes received (823 bytes). Nothing was signed or sent.
+
+╭──────────────────────────────────────────────────────────────────────────────────────── ✓  PUMPPORTAL PROBE  (HTTP 200) ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ Status:        200                                                                                                                                                                                               │
+│ URI tested:    https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4                                                                                                     │
+│ Amount:        0.0 SOL                                                                                                                                                                                           │
+│ Content-Type:  application/octet-stream                                                                                                                                                                          │
+│ Body (text):                                                                                                                                                                                                     │
+│ "\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00�\x02\x00\x04\rR\x05�p����m��\x14\x1f�\x1b�\x1a\x05�K\x1f�7��\x0fӫ�%���\x0ci\x1d\x0b�߯QR֑���%�L��W�B�(qT�#�F� │
+│ \rUc��x��\x0f\x03�yE�&���\\�\x00\x0e\x05�\x11D�V�U\x12�v�Se'l�\\Q��\x05`s�����\x1f�\x01lD\x08�e�\x00\x05*�קڧ$�갧)T��ZԠg\x16`gLN\x03EY�=e�\x00���}����N\\�\x02�\x03�9�\x08S����\x17\x1f�J�\x17A��_�j�y���l�k\x0b# │
+│ �a�Z7\x1e\x01                                                                                                                                                                                                    │
+│ ��\x13��=\x13�x�Ǘc7�V�_%\x03\x1e�μ�r�B�m�6��`��tv��4�n\x19���k��\x10y�:1���KkMɒ�*��\x11\x03\x06Fo�!\x172�쭺rÛ缌���\x12k,C�:@\x00\x00\x00\x01V���fZ�D�\x15h�\x17[�Q�˗���;e]+��m\x18�\x06���c�%g�dh�^�QѢ��n\x124�� │
+│ �u\x14�p�+�\x06����u��\x18B]��l�ڶ\x1a�M��\r'���(ء��6��<��B�+\rMxℳ���\x01�5�|�\x12��\x07!ڽ�\x03\t\x00\x05\x02\x00�\x04\x00\t\x00\t\x03��\x17\x00\x00\x00\x00\x00\n\x10\x01\x0b\x02\x03\r\x00\x0e\x0c\x0f\x04\x05\ │
+│ x06\x07\x08\x10\n�\x01\u0590L�_�1�\n\x00\x00\x00ProbeToken\x05\x00\x00\x00PROBE]\x00\x00\x00https://gateway.pinata.cloud/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4R\x05�p����m��\x14\x1f� │
+│ \x1b�\x1a\x05�K\x1f�7��\x0fӫ�%�\x00\x01h��A�|r�\x0c�̈́\x1f�/��)S��2�\x0c���^��C\x00\x04\x0b\x01\x07\x05"                                                                                                           │
+│                                                                                                                                                                                                                  │
+│ Transaction bytes received: 823 bytes.                                                                                                                                                                           │
+│ Nothing was signed or sent — this is safe.                                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Natnaels-MacBook-Pro:coinvault natnael$ 
+Natnaels-MacBook-Pro:coinvault natnael$ # Test B — ipfs.io
+Natnaels-MacBook-Pro:coinvault natnael$ python3 main.py probe-pumpportal \
+>   --uri https://ipfs.io/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:32:30 | INFO     | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_233230.log
+23:32:30 | WARNING  | plyer not available - desktop notifications disabled
+23:32:30 | WARNING  | pygame not available - sound alerts disabled
+Initializing Wallet Manager...
+✓ Dev wallet loaded: 6XBWSuqRRv1f...
+✓ Fund wallet 1 loaded: BANP1fBbsjNn...
+✓ Fund wallet 2 loaded: 5myFfY5Bhg4e...
+✓ Fund wallet 3 loaded: 6FLZ9p6tQBmb...
+✓ Fund wallet 4 loaded: 3EwJw8SXhc6a...
+✓ Fund wallet 5 loaded: H58pPr4DfHrP...
+✓ Loaded 5 fund wallet(s)
+23:32:30 | INFO     | [PROBE] Sending test payload to PumpPortal (https://pumpportal.fun/api/trade-local)...
+23:32:30 | INFO     | [PROBE] URI under test: https://ipfs.io/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:32:30 | INFO     | [PROBE] Amount: 0.0 SOL  (nothing will be signed/sent)
+23:32:30 | INFO     | [PROBE] ✓ PumpPortal returned 200 — connection is healthy. Transaction bytes received (810 bytes). Nothing was signed or sent.
+
+╭──────────────────────────────────────────────────────────────────────────────────────── ✓  PUMPPORTAL PROBE  (HTTP 200) ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ Status:        200                                                                                                                                                                                               │
+│ URI tested:    https://ipfs.io/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4                                                                                                                  │
+│ Amount:        0.0 SOL                                                                                                                                                                                           │
+│ Content-Type:  application/octet-stream                                                                                                                                                                          │
+│ Body (text):                                                                                                                                                                                                     │
+│ "\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00�\x02\x00\x04\rR\x05�p����m��\x14\x1f�\x1b�\x1a\x05�K\x1f�7��\x0fӫ�%�ЎI�J2\\�.\\�b-=��o���`����w*����H*\x1f │
+│ \x02\x11rܪ�\x05]&�;Q�m�+���\x0e�ϊ26���H������Z4\x1fX�rHp���\n�Q٣��\x18��\x17Ą�Q\x05*�קڧ$�갧)T��ZԠg\x16`gLN\x03EY�=e�\x00���}����N\\�\x02�\x03�9�\x08S����\x17\x1f�J�\x17A��_�j�y���l�k\x0b#�a�Z7\x1e\x01         │
+│ ��\x13��=\x13�x\x1c&d�Fn����y��`�                                                                                                                                                                                │
+│ zl�U\x11\x00��\x02\x7f\x1b�ެ$�Y\x14\x00\\/m�'��e�G�e��\x14rϚ��\r�=o�j\x03\x06Fo�!\x172�쭺rÛ缌���\x12k,C�:@\x00\x00\x00\x01V���fZ�D�\x15h�\x17[�Q�˗���;e]+��m\x18�\x06���c�%g�dh�^�QѢ��n\x124���u\x14�p�+�\x06���� │
+│ u��\x18B]��l�ڶ\x1a�M��\r'���(ء��6��<��B�+\rMxℳ���\x01�5�|�\x12��\x07!ڽ�\x03\t\x00\x05\x02\x00�\x04\x00\t\x00\t\x03��\x17\x00\x00\x00\x00\x00\n\x10\x01\x0b\x02\x03\r\x00\x0e\x0c\x0f\x04\x05\x06\x07\x08\x10\n�\ │
+│ x01\u0590L�_�1�\n\x00\x00\x00ProbeToken\x05\x00\x00\x00PROBEP\x00\x00\x00https://ipfs.io/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4R\x05�p����m��\x14\x1f�\x1b�\x1a\x05�K\x1f�7��\x0fӫ�%�\ │
+│ x00\x01h��A�|r�\x0c�̈́\x1f�/��)S��2�\x0c���^��C\x00\x04\x0b\x01\x07\x05"                                                                                                                                           │
+│                                                                                                                                                                                                                  │
+│ Transaction bytes received: 810 bytes.                                                                                                                                                                           │
+│ Nothing was signed or sent — this is safe.                                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Natnaels-MacBook-Pro:coinvault natnael$ 
+Natnaels-MacBook-Pro:coinvault natnael$ # Test C — dweb.link
+Natnaels-MacBook-Pro:coinvault natnael$ python3 main.py probe-pumpportal \
+>   --uri https://dweb.link/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:33:37 | INFO     | Logging to file: /Users/natnael/Youtube Projects/coinvault/coinvault/logs/pumpfun_bot_20260717_233337.log
+23:33:37 | WARNING  | plyer not available - desktop notifications disabled
+23:33:37 | WARNING  | pygame not available - sound alerts disabled
+Initializing Wallet Manager...
+✓ Dev wallet loaded: 6XBWSuqRRv1f...
+✓ Fund wallet 1 loaded: BANP1fBbsjNn...
+✓ Fund wallet 2 loaded: 5myFfY5Bhg4e...
+✓ Fund wallet 3 loaded: 6FLZ9p6tQBmb...
+✓ Fund wallet 4 loaded: 3EwJw8SXhc6a...
+✓ Fund wallet 5 loaded: H58pPr4DfHrP...
+✓ Loaded 5 fund wallet(s)
+23:33:37 | INFO     | [PROBE] Sending test payload to PumpPortal (https://pumpportal.fun/api/trade-local)...
+23:33:37 | INFO     | [PROBE] URI under test: https://dweb.link/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4
+23:33:37 | INFO     | [PROBE] Amount: 0.0 SOL  (nothing will be signed/sent)
+23:33:37 | INFO     | [PROBE] ✓ PumpPortal returned 200 — connection is healthy. Transaction bytes received (812 bytes). Nothing was signed or sent.
+
+╭──────────────────────────────────────────────────────────────────────────────────────── ✓  PUMPPORTAL PROBE  (HTTP 200) ─────────────────────────────────────────────────────────────────────────────────────────╮
+│ Status:        200                                                                                                                                                                                               │
+│ URI tested:    https://dweb.link/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4                                                                                                                │
+│ Amount:        0.0 SOL                                                                                                                                                                                           │
+│ Content-Type:  application/octet-stream                                                                                                                                                                          │
+│ Body (text):                                                                                                                                                                                                     │
+│ "\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0 │
+│ 0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00�\x02\x00\x04\rR\x05�p����m��\x14\x1f�\x1b�\x1a\x05�K\x1f�7��\x0fӫ�%�:�&�\x01\x17�d�?���ri.����]\x1a1��\x11 │
+│ JK��.\x08\x19\x07�]��ӥ�y\x01`Q:\x1f�,��3�� A}Z                                                                                                                                                                   │
+│ \\`�W\x1c�<\x17u�\x0b��f���\x19�\x03�L�!8f�\x10�\\K��Ӯl\x05*�קڧ$�갧)T��ZԠg\x16`gLN\x03EY�=e�\x00���}����N\\�\x02�\x03�9�\x08S����\x17\x1f�J�\x17A��_�j�y���l�k\x0b#�a�Z7\x1e\x01                                 │
+│ ��\x13��=\x13�x\x14Ck�1�\x0cn���Ks\x19��(�<T7_rUt��&�!u\x08UK�:��\x17\x1f�4w[`�-���__��$\x1e��x�bR�\x03\x06Fo�!\x172�쭺rÛ缌���\x12k,C�:@\x00\x00\x00\x01V���fZ�D�\x15h�\x17[�Q�˗���;e]+��m\x18�\x06���c�%g�dh�^� │
+│ QѢ��n\x124���u\x14�p�+�\x06����u��\x18B]��l�ڶ\x1a�M��\r'���(ء��:^1�s�+\x04\x16�[\x19|��g                                                                                                                         │
+│ ~\x07w��5�\\���\tp\x03\t\x00\x05\x02\x00�\x04\x00\t\x00\t\x03��\x17\x00\x00\x00\x00\x00\n\x10\x01\x0b\x02\x03\r\x00\x0e\x0c\x0f\x04\x05\x06\x07\x08\x10\n�\x01\u0590L�_�1�\n\x00\x00\x00ProbeToken\x05\x00\x00\x │
+│ 00PROBER\x00\x00\x00https://dweb.link/ipfs/bafkreieqdbur5ixi32tqv6dtffrtqpc5klyls5wj4cospvbts3xrtytkm4R\x05�p����m��\x14\x1f�\x1b�\x1a\x05�K\x1f�7��\x0fӫ�%�\x00\x01h��A�|r�\x0c�̈́\x1f�/��)S��2�\x0c���^��C\x00\x │
+│ 04\x0b\x01\x07\x05"                                                                                                                                                                                              │
+│                                                                                                                                                                                                                  │
+│ Transaction bytes received: 812 bytes.                                                                                                                                                                           │
+│ Nothing was signed or sent — this is safe.                                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Natnaels-MacBook-Pro:coinvault natnael$ 
