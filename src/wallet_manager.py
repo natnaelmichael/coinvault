@@ -14,13 +14,10 @@ from solana.rpc.commitment import Confirmed
 from solana.rpc.types import TxOpts
 import base58
 import asyncio
-from rich.console import Console
 from rich.table import Table
 
 from .config import config
-
-
-console = Console()
+from .logger import logger
 
 
 class Wallet:
@@ -67,35 +64,35 @@ class WalletManager:
     
     async def initialize(self):
         """Initialize wallet manager with configured wallets"""
-        console.print("[cyan]Initializing Wallet Manager...[/cyan]")
-        
+        logger.info("Initializing Wallet Manager...")
+
         # Initialize RPC client
         self.rpc_client = AsyncClient(config.rpc_url)
-        
+
         # Load dev wallet
         if config.dev_wallet_key:
             try:
                 self.dev_wallet = Wallet.from_private_key(config.dev_wallet_key, "Dev Wallet")
-                console.print(f"[green]✓[/green] Dev wallet loaded: {str(self.dev_wallet.public_key)[:12]}...")
+                logger.info(f"✓ Dev wallet loaded: {str(self.dev_wallet.public_key)[:12]}...")
             except Exception as e:
-                console.print(f"[red]✗[/red] Failed to load dev wallet: {e}")
+                logger.error(f"✗ Failed to load dev wallet: {e}")
         else:
-            console.print("[yellow]⚠[/yellow] DEV_WALLET_PRIVATE_KEY not set in .env")
-        
+            logger.warning("DEV_WALLET_PRIVATE_KEY not set in .env")
+
         # Load fund wallets from .env (FUND_WALLET_PRIVATE_KEYS=key1,key2,key3)
         if not config.fund_wallet_keys:
-            console.print("[yellow]⚠[/yellow] No FUND_WALLET_PRIVATE_KEYS found in .env")
+            logger.warning("No FUND_WALLET_PRIVATE_KEYS found in .env")
         else:
             self.fund_wallets = []  # Reset to avoid duplicates on re-init
             for i, key in enumerate(config.fund_wallet_keys, 1):
                 try:
                     wallet = Wallet.from_private_key(key, f"Fund Wallet {i}")
                     self.fund_wallets.append(wallet)
-                    console.print(f"[green]✓[/green] Fund wallet {i} loaded: {str(wallet.public_key)[:12]}...")
+                    logger.info(f"✓ Fund wallet {i} loaded: {str(wallet.public_key)[:12]}...")
                 except Exception as e:
-                    console.print(f"[yellow]⚠[/yellow] Failed to load fund wallet {i}: {e}")
-        
-        console.print(f"[green]✓[/green] Loaded {len(self.fund_wallets)} fund wallet(s)")
+                    logger.warning(f"Failed to load fund wallet {i}: {e}")
+
+        logger.info(f"✓ Loaded {len(self.fund_wallets)} fund wallet(s)")
         
         # Fetch initial balances
         await self.update_all_balances()
@@ -120,7 +117,7 @@ class WalletManager:
             if response.value is not None:
                 wallet.balance_sol = response.value / 1e9  # Convert lamports to SOL
         except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Failed to fetch balance for {wallet}: {e}")
+            logger.warning(f"Failed to fetch balance for {wallet}: {e}")
     
     def get_total_balance(self) -> float:
         """Get total SOL balance across all wallets"""
@@ -160,7 +157,8 @@ class WalletManager:
             style="bold yellow"
         )
         
-        console.print(table)
+        from rich.console import Console as _Console
+        _Console().print(table)
     
     async def distribute_sol(self, amount_per_wallet: float, from_dev: bool = True) -> bool:
         """
@@ -174,31 +172,30 @@ class WalletManager:
             True if distribution was successful
         """
         if not self.dev_wallet:
-            console.print("[red]✗[/red] Dev wallet not configured")
+            logger.error("✗ Dev wallet not configured")
             return False
-        
-        if not self.fund_wallets:
-            console.print("[red]✗[/red] No fund wallets configured")
-            return False
-        
-        total_needed = amount_per_wallet * len(self.fund_wallets)
-        
-        # Check if dev wallet has enough balance
-        if self.dev_wallet.balance_sol < total_needed + 0.01:  # +0.01 for fees
-            console.print(f"[red]✗[/red] Insufficient balance in dev wallet")
-            console.print(f"    Need: {total_needed:.4f} SOL + fees")
-            console.print(f"    Have: {self.dev_wallet.balance_sol:.4f} SOL")
-            return False
-        
-        console.print(f"[cyan]Distributing {amount_per_wallet:.4f} SOL to {len(self.fund_wallets)} wallets...[/cyan]")
-        
-        if config.dry_run_mode:
-            console.print("[yellow]🔴 DRY RUN MODE - No actual transfers will be made[/yellow]")
-            for wallet in self.fund_wallets:
-                console.print(f"    Would send {amount_per_wallet:.4f} SOL to {wallet.label}")
-            return True
 
-        console.print(f"\n[bold cyan]Distributing {amount_per_wallet:.4f} SOL to {len(self.fund_wallets)} wallets...[/bold cyan]\n")
+        if not self.fund_wallets:
+            logger.error("✗ No fund wallets configured")
+            return False
+
+        total_needed = amount_per_wallet * len(self.fund_wallets)
+
+        if self.dev_wallet.balance_sol < total_needed + 0.01:  # +0.01 for fees
+            logger.error(
+                f"✗ Insufficient balance in dev wallet — "
+                f"need {total_needed:.4f} SOL + fees, "
+                f"have {self.dev_wallet.balance_sol:.4f} SOL"
+            )
+            return False
+
+        logger.info(f"Distributing {amount_per_wallet:.4f} SOL to {len(self.fund_wallets)} wallets...")
+
+        if config.dry_run_mode:
+            logger.info("[DRY RUN] No actual transfers will be made")
+            for wallet in self.fund_wallets:
+                logger.info(f"  Would send {amount_per_wallet:.4f} SOL to {wallet.label}")
+            return True
 
         successful = 0
         failed = 0
@@ -210,11 +207,11 @@ class WalletManager:
             else:
                 failed += 1
 
-        console.print(f"\n{'─'*60}")
-        console.print(f"[bold]Distribution Summary[/bold]")
-        console.print(f"  Successful: [green]{successful}[/green]  |  Failed: [red]{failed}[/red]")
-        console.print(f"  Total sent: [green]{amount_per_wallet * successful:.4f} SOL[/green]")
-        console.print(f"{'─'*60}\n")
+        logger.info(
+            f"Distribution summary — "
+            f"successful: {successful}, failed: {failed}, "
+            f"total sent: {amount_per_wallet * successful:.4f} SOL"
+        )
 
         await self.update_all_balances()
         return failed == 0
@@ -231,15 +228,6 @@ class WalletManager:
 
         timestamp = datetime.now().strftime("%H:%M:%S")
         lamports = int(amount_sol * 1e9)
-
-        # Print pending line before sending
-        console.print(
-            f"  [dim]{timestamp}[/dim]  "
-            f"[cyan]{to_wallet.label}[/cyan]  "
-            f"[dim]{str(to_wallet.public_key)[:20]}...[/dim]  "
-            f"[yellow]{amount_sol:.4f} SOL[/yellow]  ",
-            end=""
-        )
 
         try:
             blockhash_resp = await self.rpc_client.get_latest_blockhash()
@@ -264,11 +252,15 @@ class WalletManager:
             )
 
             sig_str = str(sig_resp.value)
-            console.print(f"[dim]sig: {sig_str[:20]}...[/dim]  [bold green]✓ OK[/bold green]")
+            logger.info(
+                f"✓ {timestamp}  {to_wallet.label}  "
+                f"{str(to_wallet.public_key)[:20]}...  "
+                f"{amount_sol:.4f} SOL  sig: {sig_str[:20]}..."
+            )
             return True
 
         except Exception as e:
-            console.print(f"[bold red]✗ FAILED[/bold red]  [dim red]{e}[/dim red]")
+            logger.error(f"✗ Transfer to {to_wallet.label} FAILED: {e}")
             return False
     
     def add_fund_wallet(self, private_key: Optional[str] = None) -> Wallet:
@@ -289,10 +281,10 @@ class WalletManager:
             wallet = Wallet.generate_new(f"Fund Wallet {wallet_num}")
         
         self.fund_wallets.append(wallet)
-        console.print(f"[green]✓[/green] Added {wallet.label}: {str(wallet.public_key)[:12]}...")
-        
+        logger.info(f"✓ Added {wallet.label}: {str(wallet.public_key)[:12]}...")
+
         if not private_key:
-            console.print(f"[yellow]⚠[/yellow] Save this private key: {wallet.get_private_key_base58()}")
+            logger.warning(f"Save this private key: {wallet.get_private_key_base58()}")
         
         return wallet
     
@@ -308,15 +300,15 @@ class WalletManager:
         """
         if 0 <= index < len(self.fund_wallets):
             removed = self.fund_wallets.pop(index)
-            console.print(f"[yellow]Removed {removed.label}[/yellow]")
-            
+            logger.info(f"Removed {removed.label}")
+
             # Re-label remaining wallets
             for i, wallet in enumerate(self.fund_wallets, 1):
                 wallet.label = f"Fund Wallet {i}"
-            
+
             return True
         else:
-            console.print(f"[red]✗[/red] Invalid wallet index: {index}")
+            logger.error(f"✗ Invalid wallet index: {index}")
             return False
     
     async def close(self):

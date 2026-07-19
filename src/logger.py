@@ -87,6 +87,21 @@ class BotLogger:
         """Log critical message"""
         self.logger.critical(message)
     
+    def silence_console(self) -> None:
+        """
+        Remove the stdout StreamHandler, keeping only the file handler.
+
+        Call this before launching the Textual TUI — any raw writes to
+        stdout while Textual owns the terminal corrupt the display (they
+        appear as flashing text in the top-left corner). Log output
+        continues uninterrupted in the log file.
+        """
+        self.logger.handlers = [
+            h for h in self.logger.handlers
+            if not (isinstance(h, logging.StreamHandler)
+                    and not isinstance(h, logging.FileHandler))
+        ]
+
     def trade(self, message: str):
         """Log trade-related message (always shown)"""
         self.logger.info(f"[TRADE] {message}")

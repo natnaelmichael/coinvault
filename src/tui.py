@@ -1942,5 +1942,10 @@ class PumpFunApp(App):
 
 def run_tui() -> None:
     """Launch the Textual TUI. Call from main.py or directly."""
+    # Remove the stdout StreamHandler before Textual takes over the terminal.
+    # Any raw writes to stdout while Textual is running appear as corrupted
+    # text in the top-left corner. The file handler stays active so nothing
+    # is lost — all log output continues going to the log file as normal.
+    logger.silence_console()
     app = PumpFunApp()
     app.run()
