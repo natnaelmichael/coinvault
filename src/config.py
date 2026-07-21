@@ -149,6 +149,13 @@ class Config:
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
         self.log_to_file = os.getenv("LOG_TO_FILE", "true").lower() == "true"
 
+        # UX — automatically open pump.fun in the browser after token creation
+        self.auto_open_browser = os.getenv("AUTO_OPEN_BROWSER", "true").lower() == "true"
+
+        # Two-wave sell: total wallet slots in wave 1 (dev wallet counts as 1).
+        # Default 4 = dev + 3 fund wallets.  Remaining fund wallets fire in wave 2.
+        self.sell_wave_size = int(os.getenv("SELL_WAVE_SIZE", "4"))
+
     def validate(self) -> tuple[bool, List[str]]:
         """Validate configuration and return (is_valid, errors)"""
         errors = []

@@ -430,6 +430,11 @@ async def create_token_menu():
             expand=False
         ))
 
+        if config.auto_open_browser:
+            import webbrowser
+            webbrowser.open(f"https://pump.fun/coin/{mint}")
+            console.print("[dim]🌐 Opened pump.fun in your browser[/dim]")
+
         # Save token info
         import json
         from datetime import datetime as _dt

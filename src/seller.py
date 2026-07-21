@@ -294,6 +294,112 @@ class TokenSeller:
 
         return sell_results
 
+    async def wave_sell_all(
+        self,
+        token_mint: str,
+        dev_wallet=None,
+        fund_wallets: Optional[List] = None,
+        wave_size: int = 4,
+        slippage_bps: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Two-wave sell-all followed by SOL collection.
+
+        Wave 1 fires ``wave_size`` wallets concurrently:
+            dev_wallet (if present) + fund_wallets[:wave_size - 1]
+        Wave 2 fires the remaining fund wallets concurrently:
+            fund_wallets[wave_size - 1:]
+
+        After both sell waves complete, all fund wallets withdraw their SOL
+        to the dev wallet (leaving the rent-exempt minimum so accounts stay
+        open).
+
+        Returns a summary dict:
+            wave1_results   List[SellResult]
+            wave2_results   List[SellResult]
+            withdraw_result Dict from withdraw_all_sol
+            total           int  — total sell attempts
+            successful      int
+            failed          int
+        """
+        fund_wallets = fund_wallets or []
+
+        # ── Build waves ──────────────────────────────────────────────────────
+        if dev_wallet:
+            fund_in_wave1 = max(0, wave_size - 1)
+            wave1_sellers = [dev_wallet] + fund_wallets[:fund_in_wave1]
+            wave2_sellers = fund_wallets[fund_in_wave1:]
+        else:
+            wave1_sellers = fund_wallets[:wave_size]
+            wave2_sellers = fund_wallets[wave_size:]
+
+        logger.info(f"🔥 Wave sell-all  token={token_mint[:8]}…")
+        logger.info(f"   Wave 1: {len(wave1_sellers)} wallet(s)")
+        logger.info(f"   Wave 2: {len(wave2_sellers)} wallet(s)")
+
+        # ── Wave 1 ───────────────────────────────────────────────────────────
+        wave1_raw = await asyncio.gather(
+            *[self.sell_token(w, token_mint, slippage_bps=slippage_bps)
+              for w in wave1_sellers],
+            return_exceptions=True,
+        )
+        wave1_results: List[SellResult] = []
+        for w, r in zip(wave1_sellers, wave1_raw):
+            if isinstance(r, Exception):
+                logger.error(f"{w.label}: wave-1 sell raised — {r}")
+                wave1_results.append(SellResult(wallet=w, success=False, error=str(r)))
+            else:
+                wave1_results.append(r)
+
+        w1_ok = sum(1 for r in wave1_results if r.success)
+        logger.info(f"   Wave 1 done: {w1_ok}/{len(wave1_results)} successful")
+
+        # ── Wave 2 ───────────────────────────────────────────────────────────
+        wave2_results: List[SellResult] = []
+        if wave2_sellers:
+            wave2_raw = await asyncio.gather(
+                *[self.sell_token(w, token_mint, slippage_bps=slippage_bps)
+                  for w in wave2_sellers],
+                return_exceptions=True,
+            )
+            for w, r in zip(wave2_sellers, wave2_raw):
+                if isinstance(r, Exception):
+                    logger.error(f"{w.label}: wave-2 sell raised — {r}")
+                    wave2_results.append(SellResult(wallet=w, success=False, error=str(r)))
+                else:
+                    wave2_results.append(r)
+            w2_ok = sum(1 for r in wave2_results if r.success)
+            logger.info(f"   Wave 2 done: {w2_ok}/{len(wave2_results)} successful")
+
+        # ── SOL collection ───────────────────────────────────────────────────
+        withdraw_result: Dict[str, Any] = {}
+        if dev_wallet and fund_wallets:
+            logger.info("💰 Collecting SOL from fund wallets → dev wallet…")
+            withdraw_result = await self.withdraw_all_sol(fund_wallets, dev_wallet)
+
+        all_results = wave1_results + wave2_results
+        ok    = sum(1 for r in all_results if r.success)
+        total = len(all_results)
+        logger.info(f"🔥 Wave sell-all complete: {ok}/{total} sells succeeded")
+
+        if ok > 0:
+            notification_manager.notify(
+                "🔥 Wave Sell Complete",
+                f"{ok}/{total} sells ✓\n"
+                f"SOL collected: {withdraw_result.get('total_withdrawn', 0):.4f}",
+                "normal",
+                "success",
+            )
+
+        return {
+            "wave1_results":   wave1_results,
+            "wave2_results":   wave2_results,
+            "withdraw_result": withdraw_result,
+            "total":           total,
+            "successful":      ok,
+            "failed":          total - ok,
+        }
+
     async def withdraw_all_sol(
         self,
         from_wallets: List,
