@@ -1571,6 +1571,9 @@ class PreloadPane(Container):
             name=t.get("name",""), symbol=t.get("symbol",""),
             description=t.get("description",""),
             image_path=t.get("image_path"),
+            twitter=t.get("twitter"),
+            telegram=t.get("telegram"),
+            website=t.get("website"),
         )
         creator = get_token_creator(wallet_manager.rpc_client)
         result  = await creator.create_token(

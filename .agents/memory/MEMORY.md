@@ -1,0 +1,1 @@
+- [QA-findings](qa-findings.md) — full list of bugs found and fixed in the July 2026 QA pass; durable lessons for future work.

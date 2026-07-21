@@ -231,6 +231,10 @@ def main() -> None:
         "--timeout", type=int, default=120, metavar="SECS",
         help="Seconds to wait for the launch worker to finish (default: 120)"
     )
+    parser.add_argument(
+        "--dry-run-check", action="store_true", default=False,
+        help="Expect the token to remain in 'preloaded' state (dry-run mode check)"
+    )
     args = parser.parse_args()
 
     _banner("PumpFun TUI — Scripted Pre-loaded Token Launch Test")

@@ -109,7 +109,7 @@ class TokenSeller:
         """
         try:
             sell_type = "all tokens"
-            if amount_tokens:
+            if amount_tokens is not None:
                 sell_type = f"{amount_tokens} tokens"
             elif percentage:
                 sell_type = f"{percentage}% of tokens"
@@ -154,7 +154,7 @@ class TokenSeller:
             
             # Add amount — by this point percentage has already been resolved to
             # amount_tokens above, so we only need two branches here.
-            if amount_tokens:
+            if amount_tokens is not None:
                 sell_data['amount'] = amount_tokens
             # If neither is set, omit 'amount' entirely → PumpPortal sells all tokens
 
@@ -202,6 +202,7 @@ class TokenSeller:
         self,
         wallets: List,
         token_mint: str,
+        amount_tokens: Optional[float] = None,
         percentage: Optional[int] = None,
         slippage_bps: Optional[int] = None,
         delay_ms: int = 0
@@ -212,6 +213,7 @@ class TokenSeller:
         Args:
             wallets: List of wallets to sell from
             token_mint: Token mint address
+            amount_tokens: Specific token amount to sell per wallet (None = use percentage or all)
             percentage: Percentage of tokens to sell from each wallet (None = all)
             slippage_bps: Slippage in basis points
             delay_ms: Delay between sells in milliseconds (0 for simultaneous)
@@ -223,7 +225,12 @@ class TokenSeller:
 
         if delay_ms == 0:
             tasks = [
-                self.sell_token(wallet, token_mint, percentage=percentage, slippage_bps=slippage_bps)
+                self.sell_token(
+                    wallet, token_mint,
+                    amount_tokens=amount_tokens,
+                    percentage=percentage,
+                    slippage_bps=slippage_bps,
+                )
                 for wallet in wallets
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -232,7 +239,10 @@ class TokenSeller:
             for i, wallet in enumerate(wallets):
                 try:
                     result = await self.sell_token(
-                        wallet, token_mint, percentage=percentage, slippage_bps=slippage_bps
+                        wallet, token_mint,
+                        amount_tokens=amount_tokens,
+                        percentage=percentage,
+                        slippage_bps=slippage_bps,
                     )
                     results.append(result)
                 except Exception as e:
@@ -250,6 +260,12 @@ class TokenSeller:
             if isinstance(result, Exception):
                 logger.error(f"Sell task failed: {result}")
                 failed += 1
+                # Create a failed SellResult so the list length always matches wallets
+                sell_results.append(SellResult(
+                    wallet=wallets[len(sell_results)],
+                    success=False,
+                    error=str(result),
+                ))
             elif isinstance(result, SellResult):
                 sell_results.append(result)
                 if result.success:

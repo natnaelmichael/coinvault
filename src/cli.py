@@ -1133,7 +1133,7 @@ async def _launch_preloaded_token():
     for i, token in enumerate(preloaded_tokens, 1):
         status_icon = "✓" if token.get('status') == 'launched' else "⏳"
         console.print(f"{i}. {status_icon} {token['name']} ({token['symbol']})")
-        console.print(f"   Description: {token.get('description', 'None')[:50]}...")
+        console.print(f"   Description: {(token.get('description') or '')[:50]}...")
         console.print(f"   Initial Buy: {token.get('initial_buy', 0)} SOL")
         if token.get('status') == 'launched':
             console.print(f"   [dim]Status: Launched (Mint: {token.get('mint', 'N/A')[:16]}...)[/dim]")
