@@ -1,13 +1,9 @@
 """
-PumpPortal API helper — retry wrapper for the trade-local endpoint.
+PumpPortal API helper
+Provides post_with_retry — an httpx POST wrapper with automatic retry on
+transient server errors (502, 503, 429) and network timeouts.
 
-PumpPortal is a free third-party service with no uptime SLA. Transient
-502/503 responses (their backend briefly unreachable behind nginx) happen
-occasionally and say nothing about whether your request was valid —
-retrying with a short backoff clears most of them without any user
-intervention. A 400, 429, or any other status is returned immediately
-without retrying, since those represent either success or a real problem
-(bad request, rate limit) that blindly retrying wouldn't fix.
+All HTTP calls to PumpPortal's trade-local endpoint go through this module.
 """
 
 import asyncio
@@ -15,9 +11,11 @@ from typing import Optional
 
 import httpx
 
-from .logger import logger
 
-RETRYABLE_STATUS_CODES = {502, 503}
+_DEFAULT_TIMEOUT   = 30.0   # seconds per attempt
+_DEFAULT_RETRIES   = 4
+_RETRY_DELAY_BASE  = 1.5    # seconds (doubles on each retry)
+_RETRYABLE_CODES   = {429, 500, 502, 503, 504}
 
 
 async def post_with_retry(
@@ -26,53 +24,47 @@ async def post_with_retry(
     json_body: Optional[dict] = None,
     content: Optional[bytes] = None,
     headers: Optional[dict] = None,
-    timeout: float = 30,
-    max_attempts: int = 3,
-    base_delay_seconds: float = 1.5,
+    timeout: float = _DEFAULT_TIMEOUT,
+    max_retries: int = _DEFAULT_RETRIES,
 ) -> httpx.Response:
     """
-    POST with retries on 502/503 only, using exponential backoff
-    (1.5s, 3s, 6s, ... by default).
+    POST *url* with automatic retry on transient errors.
 
-    Any other status code — 200, 400, 429, etc. — is returned immediately
-    on the first attempt, unretried.
+    Exactly one of json_body or content must be supplied:
+      - json_body : dict  → serialised to JSON by httpx; sets Content-Type automatically.
+      - content   : bytes → sent as-is; caller is responsible for the Content-Type header.
 
-    On a network-level failure (timeout, connection refused) on every
-    attempt, re-raises the underlying httpx exception. On exhausting all
-    retries against 502/503, returns the last such response so the caller
-    can log/handle it exactly like any other failed response.
+    Returns the httpx.Response from the final successful (or last) attempt.
+    Raises the underlying exception only if all retries are exhausted.
     """
-    last_response: Optional[httpx.Response] = None
-    last_exception: Optional[Exception] = None
+    last_exc: Optional[Exception] = None
+    delay = _RETRY_DELAY_BASE
 
-    for attempt in range(1, max_attempts + 1):
+    for attempt in range(1, max_retries + 2):   # +1 for the initial attempt
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                if content is not None:
-                    response = await client.post(url, headers=headers, content=content)
+                if json_body is not None:
+                    response = await client.post(url, json=json_body, headers=headers or {})
                 else:
-                    response = await client.post(url, headers=headers, json=json_body)
+                    response = await client.post(url, content=content, headers=headers or {})
 
-            if response.status_code not in RETRYABLE_STATUS_CODES:
-                return response  # success, or a non-retryable error — return as-is
+            if response.status_code not in _RETRYABLE_CODES:
+                return response
 
-            last_response = response
-            logger.warning(
-                f"[{response.status_code}] {url} — attempt {attempt}/{max_attempts} "
-                f"failed. {'Retrying...' if attempt < max_attempts else 'Giving up.'}"
-            )
+            last_exc = None   # not a hard exception — just a retryable status
+            if attempt > max_retries:
+                return response  # return the last bad response rather than raising
 
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
-            last_exception = e
-            logger.warning(
-                f"Network error on {url} — attempt {attempt}/{max_attempts}: {e}. "
-                f"{'Retrying...' if attempt < max_attempts else 'Giving up.'}"
-            )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt > max_retries:
+                raise
 
-        if attempt < max_attempts:
-            delay = base_delay_seconds * (2 ** (attempt - 1))
-            await asyncio.sleep(delay)
+        wait = min(delay, 30.0)
+        await asyncio.sleep(wait)
+        delay *= 2
 
-    if last_response is not None:
-        return last_response
-    raise last_exception
+    # Should not be reached, but satisfies type checkers
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"post_with_retry: exhausted retries for {url}")

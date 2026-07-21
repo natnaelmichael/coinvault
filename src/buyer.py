@@ -184,6 +184,12 @@ class TokenBuyer:
             if isinstance(result, Exception):
                 logger.error(f"Buy task failed: {result}")
                 failed += 1
+                # Create a failed BuyResult so the list length always matches wallets
+                buy_results.append(BuyResult(
+                    wallet=wallets[len(buy_results)],
+                    success=False,
+                    error=str(result),
+                ))
             elif isinstance(result, BuyResult):
                 buy_results.append(result)
                 if result.success:

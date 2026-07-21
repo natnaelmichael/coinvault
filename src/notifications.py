@@ -3,6 +3,7 @@ Notification System
 Handles desktop notifications and sound alerts
 """
 
+import asyncio
 import os
 import sys
 from typing import Optional
@@ -91,19 +92,29 @@ class NotificationManager:
             logger.warning(f"Failed to send desktop notification: {e}")
     
     def _play_sound(self, sound_type: str = "default"):
-        """Play sound alert"""
+        """Play sound alert (non-blocking — spawns subprocess in a thread)."""
         try:
-            # For now, use system beep
-            # In future, we can add custom sound files
-            if sys.platform == "darwin":  # macOS
-                os.system('afplay /System/Library/Sounds/Glass.aiff')
-            elif sys.platform == "linux":
-                os.system('paplay /usr/share/sounds/freedesktop/stereo/bell.oga 2>/dev/null || beep')
-            elif sys.platform == "win32":
+            if sys.platform == "win32":
                 import winsound
                 frequency = 1000 if sound_type == "default" else 1500
                 duration = 200 if sound_type == "default" else 400
-                winsound.Beep(frequency, duration)
+                # winsound.Beep is already fast enough and doesn't block the event loop
+                # for meaningful durations, but wrap it in a thread to be safe.
+                asyncio.get_event_loop().run_in_executor(
+                    None, winsound.Beep, frequency, duration
+                )
+            elif sys.platform == "darwin":
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: os.system('afplay /System/Library/Sounds/Glass.aiff'),
+                )
+            elif sys.platform == "linux":
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: os.system(
+                        'paplay /usr/share/sounds/freedesktop/stereo/bell.oga 2>/dev/null || beep'
+                    ),
+                )
         except Exception as e:
             logger.debug(f"Could not play sound: {e}")
     
