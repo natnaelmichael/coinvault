@@ -400,6 +400,7 @@ class TokenListModal(ModalScreen):
     #tl-add-grid { height: 3; layout: horizontal; align: left middle; margin-bottom: 1; }
     #tl-mint-label  { width: 18; color: $text-muted; text-align: right; padding-right: 1; }
     #tl-mint-input  { width: 1fr; }
+    #btn-tl-save    { margin-left: 1; min-width: 14; }
     #tl-sym-grid  { height: 3; layout: horizontal; align: left middle; margin-bottom: 1; }
     #tl-sym-label   { width: 18; color: $text-muted; text-align: right; padding-right: 1; }
     #tl-sym-input   { width: 20; }
@@ -424,11 +425,11 @@ class TokenListModal(ModalScreen):
             with Horizontal(id="tl-add-grid"):
                 yield Label("Mint address:", id="tl-mint-label")
                 yield Input(placeholder="Base58 address…", id="tl-mint-input")
+                yield Button("✚ Save Mint", variant="success", id="btn-tl-save")
             with Horizontal(id="tl-sym-grid"):
                 yield Label("Symbol (opt.):", id="tl-sym-label")
                 yield Input(placeholder="e.g. DOGE2", id="tl-sym-input")
             with Horizontal(id="tl-bottom-row"):
-                yield Button("Add to Watchlist", variant="success", id="btn-tl-add")
                 yield Button("Close", id="btn-tl-close")
 
     def _build_list(self) -> ListView:
@@ -499,7 +500,8 @@ class TokenListModal(ModalScreen):
 
     # ── Add manually ──────────────────────────────────────────────────────────
 
-    @on(Button.Pressed, "#btn-tl-add")
+    @on(Button.Pressed, "#btn-tl-save")
+    @on(Input.Submitted, "#tl-mint-input")
     def on_add(self) -> None:
         mint = self.query_one("#tl-mint-input", Input).value.strip()
         sym  = self.query_one("#tl-sym-input",  Input).value.strip()
