@@ -122,12 +122,27 @@ def _watchlist_remove(mint: str) -> bool:
 
 
 def _watchlist_bulk_load() -> int:
-    """Merge all created_tokens into the watchlist. Returns count of new additions."""
-    added = 0
+    """
+    Merge all created_tokens into the watchlist in a single read + single write.
+    Returns count of new additions.
+    """
+    existing      = _load_watchlist()
+    existing_mints = {e.get("mint", "") for e in existing}
+    to_add: list  = []
     for t in _load_created_tokens():
-        if _watchlist_add(t.get("mint",""), t.get("symbol",""), t.get("name","")):
-            added += 1
-    return added
+        mint = (t.get("mint") or "").strip()
+        if not mint or mint in existing_mints:
+            continue
+        to_add.append({
+            "mint":     mint,
+            "symbol":   ((t.get("symbol") or "?").strip().upper() or "?"),
+            "name":     (t.get("name") or "").strip(),
+            "added_at": datetime.now().isoformat(),
+        })
+        existing_mints.add(mint)
+    if to_add:
+        _save_watchlist(existing + to_add)
+    return len(to_add)
 
 
 def _fmt_price(p: Optional[float]) -> str:
@@ -448,13 +463,18 @@ class TokenListModal(ModalScreen):
         return lv
 
     def _refresh_list(self) -> None:
-        """Rebuild the list widget in-place after a data change."""
-        old = self.query_one("#tl-list", ListView)
-        new = self._build_list()
-        old.remove()
-        # Mount the new ListView before the action-row
-        action_row = self.query_one("#tl-action-row")
-        self.query_one("Container").mount(new, before=action_row)
+        """Update the list widget in-place — clear then repopulate to avoid duplicate-ID crashes."""
+        lv = self.query_one("#tl-list", ListView)
+        lv.clear()
+        if self._entries:
+            for e in self._entries:
+                sym   = (e.get("symbol") or "?")
+                mint  = (e.get("mint")   or "")
+                ts    = (e.get("added_at") or "")[:10]
+                short = (mint[:32] + "…") if len(mint) > 32 else mint
+                lv.append(ListItem(Label(f"  {sym:<10}  {short:<35}  [dim]{ts}[/dim]")))
+        else:
+            lv.append(ListItem(Label("  (watchlist is empty)")))
 
     def _set_status(self, msg: str) -> None:
         self.query_one("#tl-status", Static).update(msg)
@@ -1271,7 +1291,7 @@ class MonitorPane(Container):
             )
             # Keep table trimmed to last 20 rows
             while tbl.row_count > 20:
-                tbl.remove_row(tbl.rows[list(tbl.rows.keys())[0]])
+                tbl.remove_row(list(tbl.rows.keys())[0])
 
 
 class SellWithdrawPane(Container):
