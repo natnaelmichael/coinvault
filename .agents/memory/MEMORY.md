@@ -1,1 +1,1 @@
-- [QA-findings](qa-findings.md) — full list of bugs found and fixed in the July 2026 QA pass; durable lessons for future work.
+- [Wave sell & browser open](wave-sell-browser.md) — Phase 1/2 implementation details: which files were changed and the key design decisions.

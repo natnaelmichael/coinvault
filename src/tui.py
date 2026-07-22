@@ -764,6 +764,20 @@ class CreateTokenPane(Container):
                     "launched_at": datetime.now().isoformat(),
                 })
                 log.write("[dim]Token saved to registry.[/dim]")
+
+                # Phase 1 — open pump.fun in the browser
+                if config.auto_open_browser:
+                    import webbrowser
+                    webbrowser.open(f"https://pump.fun/coin/{mint}")
+                    log.write("[dim]🌐 Opened pump.fun in browser[/dim]")
+
+                # Phase 2 — auto-navigate to the monitor pane
+                try:
+                    self.app.query_one(ContentSwitcher).current = "pane-monitor"
+                    monitor = self.app.query_one(MonitorPane)
+                    monitor._on_token_picked(mint)
+                except Exception:
+                    pass
             else:
                 log.write("[red]✗ Token creation failed — check logs above[/red]")
         except Exception as exc:
@@ -897,7 +911,15 @@ class MonitorPane(Container):
 
     BINDINGS = [
         Binding("ctrl+l", "token_list", "Manage watchlist", show=True),
+        Binding("s", "sell_all", "Sell All", show=True),
     ]
+
+    _FOOTER_DEFAULT = (
+        "[dim]Ctrl+L[/dim] manage watchlist   "
+        "[dim]Ctrl+C[/dim] back to menu   "
+        "[dim]S[/dim] sell all   "
+        "[dim]●[/dim] PumpPortal WebSocket"
+    )
 
     DEFAULT_CSS = """
     MonitorPane { layout: vertical; height: 1fr; padding: 0; }
@@ -954,12 +976,7 @@ class MonitorPane(Container):
         with Container(id="mon-trades"):
             tbl = DataTable(id="mon-table", cursor_type="none")
             yield tbl
-        yield Static(
-            "[dim]Ctrl+L[/dim] manage watchlist   "
-            "[dim]Ctrl+C[/dim] back to menu   "
-            "[dim]●[/dim] PumpPortal WebSocket",
-            id="mon-footer",
-        )
+        yield Static(self._FOOTER_DEFAULT, id="mon-footer")
 
     def on_mount(self) -> None:
         tbl = self.query_one("#mon-table", DataTable)
@@ -977,6 +994,81 @@ class MonitorPane(Container):
 
     def on_hide(self) -> None:
         self.workers.cancel_all()
+
+    # ── Sell-all hotkey (S) ───────────────────────────────────────────────────
+
+    def action_sell_all(self) -> None:
+        """Prompt the user then fire the two-wave sell + SOL collection."""
+        if not self._token_mint:
+            self.notify("Select a token first", severity="warning")
+            return
+        if not wallet_manager.dev_wallet and not wallet_manager.fund_wallets:
+            self.notify("No wallets configured", severity="error")
+            return
+
+        wave_size   = config.sell_wave_size
+        n_dev       = 1 if wallet_manager.dev_wallet else 0
+        n_fund      = len(wallet_manager.fund_wallets)
+        w1_fund     = max(0, wave_size - n_dev)
+        w1_count    = min(n_dev + w1_fund, n_dev + n_fund)
+        w2_count    = max(0, n_fund - w1_fund)
+        total       = n_dev + n_fund
+        sym         = self._token_sym or self._token_mint[:20] + "…"
+
+        self.app.push_screen(
+            ConfirmModal(
+                f"[bold yellow]🔥 SELL ALL — {sym}[/bold yellow]\n\n"
+                f"  Wave 1: [bold]{w1_count}[/bold] wallet(s)  "
+                f"(dev + first {w1_fund} fund)\n"
+                f"  Wave 2: [bold]{w2_count}[/bold] wallet(s)  "
+                f"(remaining fund wallets)\n"
+                f"  Then:   SOL → dev wallet\n\n"
+                f"[dim]Total {total} seller(s).  "
+                f"Set SELL_WAVE_SIZE in .env to adjust.[/dim]\n\n"
+                f"[red bold]This cannot be undone.[/red bold]"
+            ),
+            lambda ok: self._do_sell_all() if ok else None,
+        )
+
+    @work(exclusive=True)
+    async def _do_sell_all(self) -> None:
+        """Worker: two-wave token sell followed by SOL collection."""
+        footer = self.query_one("#mon-footer", Static)
+        seller = get_token_seller(wallet_manager.rpc_client)
+        try:
+            footer.update(
+                "[yellow]🔥 Wave 1 selling…[/yellow]   "
+                "[dim]Ctrl+C[/dim] back to menu   "
+                "[dim]●[/dim] PumpPortal WebSocket"
+            )
+            summary = await seller.wave_sell_all(
+                token_mint   = self._token_mint,
+                dev_wallet   = wallet_manager.dev_wallet,
+                fund_wallets = wallet_manager.fund_wallets,
+                wave_size    = config.sell_wave_size,
+            )
+
+            w1      = summary["wave1_results"]
+            w2      = summary["wave2_results"]
+            w1_ok   = sum(1 for r in w1 if r.success)
+            w2_ok   = sum(1 for r in w2 if r.success)
+            wr      = summary.get("withdraw_result", {})
+            ok      = summary["successful"]
+            total   = summary["total"]
+            sol_col = wr.get("total_withdrawn", 0.0)
+
+            sev = "information" if ok == total else "warning"
+            self.notify(
+                f"Wave 1: {w1_ok}/{len(w1)}  Wave 2: {w2_ok}/{len(w2)}\n"
+                f"SOL collected: {sol_col:.4f}",
+                title="🔥 Sell All Complete",
+                severity=sev,
+                timeout=8,
+            )
+        except Exception as exc:
+            self.notify(f"Sell error: {exc}", severity="error", timeout=10)
+        finally:
+            footer.update(self._FOOTER_DEFAULT)
 
     # ── Token selection ───────────────────────────────────────────────────────
 
@@ -1594,6 +1686,20 @@ class PreloadPane(Container):
             log.write(f"[green]✓ Launched!  Mint: {mint}[/green]")
             log.write(f"  https://pump.fun/coin/{mint}")
             self._refresh_list()
+
+            # Phase 1 — open pump.fun in the browser
+            if config.auto_open_browser:
+                import webbrowser
+                webbrowser.open(f"https://pump.fun/coin/{mint}")
+                log.write("[dim]🌐 Opened pump.fun in browser[/dim]")
+
+            # Phase 2 — auto-navigate to the monitor pane
+            try:
+                self.app.query_one(ContentSwitcher).current = "pane-monitor"
+                monitor = self.app.query_one(MonitorPane)
+                monitor._on_token_picked(mint)
+            except Exception:
+                pass
         else:
             log.write("[red]✗ Launch failed[/red]")
 

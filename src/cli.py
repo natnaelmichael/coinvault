@@ -1218,7 +1218,12 @@ async def _launch_preloaded_token():
             border_style="green",
             expand=False
         ))
-        
+
+        if config.auto_open_browser:
+            import webbrowser
+            webbrowser.open(f"https://pump.fun/coin/{mint}")
+            console.print("[dim]🌐 Opened pump.fun in your browser[/dim]")
+
         # Update preloaded token status
         selected_token['status'] = 'launched'
         selected_token['mint'] = mint
