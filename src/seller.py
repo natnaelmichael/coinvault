@@ -322,6 +322,7 @@ class TokenSeller:
             failed          int
         """
         fund_wallets = fund_wallets or []
+        wave_size    = max(1, wave_size)   # guard: size ≤ 0 would put everyone in wave 2
 
         # ── Build waves ──────────────────────────────────────────────────────
         if dev_wallet:

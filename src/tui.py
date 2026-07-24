@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -65,16 +66,20 @@ def _load_created_tokens() -> list:
         return []
 
 
+_SAVE_TOKEN_LOCK = threading.Lock()
+
+
 def _save_token(data: dict) -> None:
     _CREATED_TOKENS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing: list = []
-    if _CREATED_TOKENS_PATH.exists():
-        try:
-            existing = json.loads(_CREATED_TOKENS_PATH.read_text())
-        except Exception:
-            pass
-    existing.append(data)
-    _CREATED_TOKENS_PATH.write_text(json.dumps(existing, indent=2))
+    with _SAVE_TOKEN_LOCK:
+        existing: list = []
+        if _CREATED_TOKENS_PATH.exists():
+            try:
+                existing = json.loads(_CREATED_TOKENS_PATH.read_text())
+            except Exception:
+                pass
+        existing.append(data)
+        _CREATED_TOKENS_PATH.write_text(json.dumps(existing, indent=2))
 
 
 def _load_watchlist() -> list:
@@ -2079,4 +2084,13 @@ def run_tui() -> None:
     # is lost — all log output continues going to the log file as normal.
     logger.silence_console()
     app = PumpFunApp()
-    app.run()
+    try:
+        app.run()
+    finally:
+        # Close the shared AsyncClient to avoid ResourceWarning on exit.
+        # Textual runs its own event loop; after app.run() returns that loop
+        # is closed, so we start a fresh one just long enough to drain it.
+        try:
+            asyncio.run(wallet_manager.close())
+        except Exception:
+            pass

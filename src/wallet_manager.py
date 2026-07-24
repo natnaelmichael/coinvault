@@ -35,13 +35,36 @@ class Wallet:
     
     @classmethod
     def from_private_key(cls, private_key: str, label: str = "") -> 'Wallet':
-        """Create wallet from base58 encoded private key"""
+        """Create wallet from base58 encoded private key.
+
+        Expects the standard 64-byte Solana keypair (secret key || public key)
+        encoded as base58 — the format exported by most Solana wallets and
+        Phantom's "Export Private Key" function.
+        """
+        if not private_key or not private_key.strip():
+            raise ValueError(
+                "Private key is empty. "
+                "Set DEV_WALLET_PRIVATE_KEY (or FUND_WALLET_PRIVATE_KEYS) in your .env file."
+            )
+        stripped = private_key.strip()
         try:
-            key_bytes = base58.b58decode(private_key)
-            keypair = Keypair.from_bytes(key_bytes)
-            return cls(keypair, label)
+            key_bytes = base58.b58decode(stripped)
         except Exception as e:
-            raise ValueError(f"Invalid private key: {e}")
+            raise ValueError(
+                f"Private key is not valid base58 ({e}). "
+                "Make sure you copied the full key without extra spaces or line breaks."
+            )
+        if len(key_bytes) != 64:
+            raise ValueError(
+                f"Private key decoded to {len(key_bytes)} bytes — expected 64. "
+                "Solana private keys are 64 bytes (secret key + public key). "
+                "If your key is 32 bytes, it may be a seed-only format not supported here."
+            )
+        try:
+            keypair = Keypair.from_bytes(key_bytes)
+        except Exception as e:
+            raise ValueError(f"Could not construct keypair from key bytes: {e}")
+        return cls(keypair, label)
     
     @classmethod
     def generate_new(cls, label: str = "") -> 'Wallet':
