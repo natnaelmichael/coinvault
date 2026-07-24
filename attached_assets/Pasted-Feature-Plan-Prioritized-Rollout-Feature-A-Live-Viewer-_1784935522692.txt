@@ -1,0 +1,49 @@
+Feature Plan & Prioritized Rollout
+Feature A — Live Viewer (Browser Auto-Open)
+What needs to happen: After successful token creation in either CLI or TUI, call webbrowser.open(f"https://pump.fun/coin/{mint}") automatically. Python's built-in webbrowser module handles macOS, Linux, and Windows with no new dependencies.
+
+On the monitor pane question: The current WebSocket price chart is valuable — it's how you know when to sell. Rather than removing it, the better play is to auto-navigate to it after creation, so you're looking at the live price immediately. This sets up Phase 2 naturally (sell-all hotkey is right there on the monitor screen). The pump.fun browser tab and the in-app chart serve different purposes: the browser shows the social/community view, the in-app chart is where you trigger the sell.
+
+Risk: ✅ Zero. Pure stdlib, two lines of code per creation path.
+Work estimate: ~1 hour. Two touch points (CLI create_token_menu, TUI CreateTokenPane._do_create + PreloadPane._do_launch) plus a config flag AUTO_OPEN_BROWSER=true.
+
+Feature B — Mappable Hotkeys (Sell-All)
+What needs to happen: After a token goes live, the TUI needs a "post-launch" mode where a single key (e.g. S) triggers the two-phase sell-all + SOL collection sequence. Textual has first-class key binding support.
+
+The two-phase sequence you described:
+
+Phase 1 — Token exit (Jito bundle): All fund wallets sell their token balance. To maximize speed and exit rate, these transactions should be sent as a Jito MEV bundle rather than individual RPC sends.
+Phase 2 — SOL collection: Each wallet sends SOL back to the dev wallet leaving the rent-exempt minimum (already implemented as seller.withdraw_all_sol()).
+On Jito: The Jito block engine accepts up to 5 transactions per bundle (including 1 mandatory tip transaction), so you get 4 sell slots per bundle. If you have more than 4 fund wallets, the bundle approach means multiple sequential bundles (e.g. 8 wallets = 2 bundles of 4). Jito requires:
+
+A tip to one of 8 rotating Jito tip accounts (typically 0.001–0.005 SOL per bundle)
+A REST call to https://mainnet.block-engine.jito.labs.io/api/v1/bundles
+No new pip package — just httpx (already installed) plus the serialization logic already in solana_tx.py
+"Post comments" and "Post socials" hotkeys — see questions below.
+
+Risk: 🟡 Medium. Jito integration is new but follows a clean REST pattern. Hotkey infrastructure in Textual is straightforward.
+Work estimate: ~4–6 hours. New src/jito_bundle.py module, update seller.py with a Jito sell path, add key bindings to MonitorPane in TUI.
+
+Feature C — Commenter
+What needs to happen: As soon as the token launches, fund wallets post comments on the pump.fun token page to create social proof alongside the bundle buy.
+
+The problem: pump.fun's comment system requires wallet-based authentication — you sign a login message with your keypair to get a session token, then POST replies to their API. This is doable (it's been reverse-engineered publicly), but:
+
+The API endpoint and auth flow can change without notice
+Comments post under the wallet's pump.fun profile (which starts empty/anonymous)
+pump.fun may rate-limit or shadowban wallet addresses that post comments in bulk
+What we can implement: A src/commenter.py module that:
+
+Signs the pump.fun auth challenge with each fund wallet's keypair
+POSTs a comment to the token's reply thread
+Runs concurrently with the bundle buy (fire-and-forget — don't let comment failures block the buy)
+Risk: 🔴 High — depends on an undocumented, unofficial API that can change. This should go last so it doesn't block the other features.
+Work estimate: ~3–4 hours if the API is stable. Plus testing.
+
+Recommended Rollout Order
+Phase	Feature	Risk	Dependency
+1	Browser auto-open after launch	✅ Zero	None
+2	Auto-navigate monitor pane after launch + hotkey skeleton	✅ Low	Phase 1
+3	Jito bundle sell-all hotkey (two-phase: sell → collect)	🟡 Medium	Phase 2
+4	Commenter (pump.fun auth + reply API)	🔴 High	Phase 1
+?	"Post socials" hotkey	❓ Unclear
