@@ -62,7 +62,6 @@ class TokenSeller:
         """
         try:
             from solders.pubkey import Pubkey
-            from spl.token.constants import TOKEN_PROGRAM_ID
 
             mint_pubkey = Pubkey.from_string(token_mint)
             response = await self.rpc_client.get_token_accounts_by_owner(

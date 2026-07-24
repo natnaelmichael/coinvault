@@ -154,6 +154,13 @@ class TokenCreator:
         headers = {"Authorization": f"Bearer {pinata_jwt}"}
 
         try:
+            if not metadata.image_path:
+                logger.error(
+                    "No image_path set on TokenMetadata — "
+                    "an image is required for pump.fun token creation."
+                )
+                return None
+
             image_path = Path(metadata.image_path).expanduser().resolve()
             if not image_path.exists():
                 logger.error(f"Image file not found: {image_path}")
@@ -297,6 +304,13 @@ class TokenCreator:
             return None
 
         # ── 1. Upload image ───────────────────────────────────────────────────
+        if not metadata.image_path:
+            logger.error(
+                "[LOCAL IPFS] No image_path set on TokenMetadata — "
+                "an image is required for pump.fun token creation."
+            )
+            return None
+
         image_path = Path(metadata.image_path).expanduser().resolve()
         if not image_path.exists():
             logger.error(f"[LOCAL IPFS] Image not found: {image_path}")
@@ -313,25 +327,35 @@ class TokenCreator:
 
         # Stage 1 — pin + DHT announce image
         await self._ipfs_pin(api, image_cid, "image")
-        asyncio.create_task(self._ipfs_dht_provide(api, image_cid, "image"))
+        # Keep a reference so the GC doesn't discard the task while it's pending
+        _dht_image_task = asyncio.create_task(
+            self._ipfs_dht_provide(api, image_cid, "image")
+        )
 
         # Stage 2 — gateway verification for image
+        # Capture the exact URL that returned HTTP 200 so the metadata JSON
+        # references the same gateway PumpPortal can actually fetch — NOT a
+        # hardcoded ipfs.io URL that may not have caught up yet.
         if config.ipfs_gateway_verify:
             logger.info("[LOCAL IPFS] Stage 2 — verifying image on public gateway...")
-            ok = await self._verify_on_gateway(image_cid, label="image")
-            if not ok:
+            image_live_url = await self._verify_on_gateway(image_cid, label="image")
+            if not image_live_url:
                 logger.error(
                     "[LOCAL IPFS] ✗ Image not reachable on public gateway within "
                     f"{config.ipfs_gateway_timeout}s — transaction aborted."
                 )
                 return None
+        else:
+            image_live_url = f"https://ipfs.io/ipfs/{image_cid}"
 
         # ── 2. Build and upload metadata JSON ────────────────────────────────
+        # Use image_live_url (the verified, reachable URL) — never reconstruct
+        # from the CID directly, as that risks a gateway mismatch with PumpPortal.
         metadata_doc: Dict[str, Any] = {
             "name":        metadata.name,
             "symbol":      metadata.symbol,
             "description": metadata.description,
-            "image":       f"https://ipfs.io/ipfs/{image_cid}",
+            "image":       image_live_url,
             "showName":    True,
         }
         if metadata.twitter:
@@ -351,20 +375,28 @@ class TokenCreator:
 
         # Stage 1 — pin + DHT announce metadata
         await self._ipfs_pin(api, meta_cid, "metadata")
-        asyncio.create_task(self._ipfs_dht_provide(api, meta_cid, "metadata"))
+        _dht_meta_task = asyncio.create_task(
+            self._ipfs_dht_provide(api, meta_cid, "metadata")
+        )
 
-        # Stage 2 — gateway verification for metadata
+        # Stage 2 — gateway verification for metadata; use the same gateway
+        # that successfully served the image (already confirmed reachable).
         if config.ipfs_gateway_verify:
+            working_gateway = image_live_url.rsplit("/", 1)[0]
             logger.info("[LOCAL IPFS] Stage 2 — verifying metadata on public gateway...")
-            ok = await self._verify_on_gateway(meta_cid, label="metadata")
-            if not ok:
+            meta_live_url = await self._verify_on_gateway(
+                meta_cid, label="metadata", gateway_base=working_gateway
+            )
+            if not meta_live_url:
                 logger.error(
                     "[LOCAL IPFS] ✗ Metadata not reachable on public gateway within "
                     f"{config.ipfs_gateway_timeout}s — transaction aborted."
                 )
                 return None
+            metadata_uri = meta_live_url
+        else:
+            metadata_uri = f"https://ipfs.io/ipfs/{meta_cid}"
 
-        metadata_uri = f"ipfs://{meta_cid}"
         logger.info(f"✓ Local IPFS upload complete — URI: {metadata_uri}")
         return {"metadataUri": metadata_uri}
 

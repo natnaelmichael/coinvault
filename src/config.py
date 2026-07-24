@@ -87,6 +87,34 @@ class Config:
         self._env_file.write_text("".join(lines))
         return True
 
+    @staticmethod
+    def _int_env(key: str, default: int) -> int:
+        """Read an integer env var, falling back to `default` on bad values."""
+        raw = os.getenv(key, "")
+        if raw.strip():
+            try:
+                return int(raw.strip())
+            except ValueError:
+                import logging
+                logging.getLogger("PumpFunBot").warning(
+                    f"Config: {key}={raw!r} is not a valid integer — using default {default}"
+                )
+        return default
+
+    @staticmethod
+    def _float_env(key: str, default: float) -> float:
+        """Read a float env var, falling back to `default` on bad values."""
+        raw = os.getenv(key, "")
+        if raw.strip():
+            try:
+                return float(raw.strip())
+            except ValueError:
+                import logging
+                logging.getLogger("PumpFunBot").warning(
+                    f"Config: {key}={raw!r} is not a valid number — using default {default}"
+                )
+        return default
+
     def _load_config(self):
         """Load all configuration values"""
         # Solana Network
@@ -102,19 +130,19 @@ class Config:
         self.fund_wallet_keys = [k.strip() for k in fund_keys_str.split(",") if k.strip()]
 
         # Trading
-        self.default_slippage_bps = int(os.getenv("DEFAULT_SLIPPAGE_BPS", "500"))
-        self.max_buy_amount_sol = float(os.getenv("MAX_BUY_AMOUNT_SOL", "1.0"))
-        self.min_buy_amount_sol = float(os.getenv("MIN_BUY_AMOUNT_SOL", "0.01"))
+        self.default_slippage_bps = self._int_env("DEFAULT_SLIPPAGE_BPS", 500)
+        self.max_buy_amount_sol   = self._float_env("MAX_BUY_AMOUNT_SOL",  1.0)
+        self.min_buy_amount_sol   = self._float_env("MIN_BUY_AMOUNT_SOL",  0.01)
 
         # Automation
         self.auto_sell_enabled = os.getenv("AUTO_SELL_ENABLED", "false").lower() == "true"
-        self.auto_sell_profit_multiplier = float(os.getenv("AUTO_SELL_PROFIT_MULTIPLIER", "2.0"))
-        self.auto_sell_mcap_threshold = float(os.getenv("AUTO_SELL_MCAP_THRESHOLD", "100000"))
+        self.auto_sell_profit_multiplier = self._float_env("AUTO_SELL_PROFIT_MULTIPLIER", 2.0)
+        self.auto_sell_mcap_threshold    = self._float_env("AUTO_SELL_MCAP_THRESHOLD",    100000.0)
         self.auto_withdraw_enabled = os.getenv("AUTO_WITHDRAW_ENABLED", "false").lower() == "true"
 
         # Monitoring
-        self.price_alert_threshold_percent = float(os.getenv("PRICE_ALERT_THRESHOLD_PERCENT", "10"))
-        self.volume_alert_threshold = float(os.getenv("VOLUME_ALERT_THRESHOLD", "1000"))
+        self.price_alert_threshold_percent = self._float_env("PRICE_ALERT_THRESHOLD_PERCENT", 10.0)
+        self.volume_alert_threshold        = self._float_env("VOLUME_ALERT_THRESHOLD",         1000.0)
         self.enable_sound_alerts = os.getenv("ENABLE_SOUND_ALERTS", "true").lower() == "true"
         self.enable_desktop_notifications = os.getenv("ENABLE_DESKTOP_NOTIFICATIONS", "true").lower() == "true"
 
@@ -141,9 +169,8 @@ class Config:
         # Set IPFS_GATEWAY_VERIFY=false to skip the gateway check (not recommended)
         self.ipfs_gateway_verify = os.getenv("IPFS_GATEWAY_VERIFY", "true").lower() == "true"
         # How many seconds to wait for the content to appear on the public gateway
-        self.ipfs_gateway_timeout = int(os.getenv("IPFS_GATEWAY_TIMEOUT", "90"))
-        # How often to re-check (seconds between polls)
-        self.ipfs_gateway_poll_interval = float(os.getenv("IPFS_GATEWAY_POLL_INTERVAL", "0.5"))
+        self.ipfs_gateway_timeout       = self._int_env("IPFS_GATEWAY_TIMEOUT",       90)
+        self.ipfs_gateway_poll_interval = self._float_env("IPFS_GATEWAY_POLL_INTERVAL", 0.5)
 
         # Logging
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -154,7 +181,7 @@ class Config:
 
         # Two-wave sell: total wallet slots in wave 1 (dev wallet counts as 1).
         # Default 4 = dev + 3 fund wallets.  Remaining fund wallets fire in wave 2.
-        self.sell_wave_size = int(os.getenv("SELL_WAVE_SIZE", "4"))
+        self.sell_wave_size = self._int_env("SELL_WAVE_SIZE", 4)
 
     def validate(self) -> tuple[bool, List[str]]:
         """Validate configuration and return (is_valid, errors)"""
