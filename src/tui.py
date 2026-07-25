@@ -1009,6 +1009,15 @@ class MonitorPane(Container):
         tbl = self.query_one("#mon-table", DataTable)
         tbl.add_columns("Time", "Side", "SOL", "Tokens", "Price (SOL)", "Wallet", "Sig")
         self.set_interval(1.0, self._tick_refresh)
+        # Reflect active Jito mode in the resting footer and binding label
+        if config.jito_enabled:
+            self._FOOTER_DEFAULT = (
+                "[dim]Ctrl+L[/dim] manage watchlist   "
+                "[dim]Ctrl+C[/dim] back to menu   "
+                "[dim]S[/dim] [bold yellow]⚡ Jito sell[/bold yellow]   "
+                "[dim]●[/dim] PumpPortal WebSocket"
+            )
+            self.query_one("#mon-footer", Static).update(self._FOOTER_DEFAULT)
 
     def _tick_refresh(self) -> None:
         """Called every second to keep the stats display live (e.g. 'last trade X s ago')."""
@@ -1025,7 +1034,7 @@ class MonitorPane(Container):
     # ── Sell-all hotkey (S) ───────────────────────────────────────────────────
 
     def action_sell_all(self) -> None:
-        """Prompt the user then fire the two-wave sell + SOL collection."""
+        """Prompt the user then fire sell + SOL collection (Jito bundle or two-wave)."""
         if not self._token_mint:
             self.notify("Select a token first", severity="warning")
             return
@@ -1033,17 +1042,41 @@ class MonitorPane(Container):
             self.notify("No wallets configured", severity="error")
             return
 
-        wave_size   = config.sell_wave_size
-        n_dev       = 1 if wallet_manager.dev_wallet else 0
-        n_fund      = len(wallet_manager.fund_wallets)
-        w1_fund     = max(0, wave_size - n_dev)
-        w1_count    = min(n_dev + w1_fund, n_dev + n_fund)
-        w2_count    = max(0, n_fund - w1_fund)
-        total       = n_dev + n_fund
-        sym         = self._token_sym or self._token_mint[:20] + "…"
+        n_dev  = 1 if wallet_manager.dev_wallet else 0
+        n_fund = len(wallet_manager.fund_wallets)
+        total  = n_dev + n_fund
+        sym    = self._token_sym or self._token_mint[:20] + "…"
 
-        self.app.push_screen(
-            ConfirmModal(
+        if config.jito_enabled:
+            # Compute worst-case tip for display (tip × multiplier^retries, capped)
+            worst_tip = config.jito_tip_sol
+            for _ in range(config.jito_max_retries):
+                worst_tip = min(worst_tip * config.jito_tip_multiplier,
+                                config.jito_max_tip_sol)
+            tip_range = (
+                f"{config.jito_tip_sol:.4f} SOL"
+                if config.jito_max_retries == 0
+                else f"{config.jito_tip_sol:.4f} → {worst_tip:.4f} SOL"
+            )
+            modal_body = (
+                f"[bold yellow]⚡ JITO BUNDLE SELL — {sym}[/bold yellow]\n\n"
+                f"  Wallets:  [bold]{total}[/bold]  "
+                f"(bundled atomically — all land or none do)\n"
+                f"  Tip:      {tip_range} per bundle\n"
+                f"  Retries:  [bold]{config.jito_max_retries}[/bold]  "
+                f"(×{config.jito_tip_multiplier:.1f} on timeout, "
+                f"cap {config.jito_max_tip_sol} SOL)\n"
+                f"  Endpoint: {config.jito_endpoint}\n"
+                f"  Then:     SOL → dev wallet\n\n"
+                f"[dim]Adjust JITO_TIP_SOL / JITO_MAX_TIP_SOL in .env.[/dim]\n\n"
+                f"[red bold]This cannot be undone.[/red bold]"
+            )
+        else:
+            wave_size = config.sell_wave_size
+            w1_fund   = max(0, wave_size - n_dev)
+            w1_count  = min(n_dev + w1_fund, n_dev + n_fund)
+            w2_count  = max(0, n_fund - w1_fund)
+            modal_body = (
                 f"[bold yellow]🔥 SELL ALL — {sym}[/bold yellow]\n\n"
                 f"  Wave 1: [bold]{w1_count}[/bold] wallet(s)  "
                 f"(dev + first {w1_fund} fund)\n"
@@ -1053,7 +1086,10 @@ class MonitorPane(Container):
                 f"[dim]Total {total} seller(s).  "
                 f"Set SELL_WAVE_SIZE in .env to adjust.[/dim]\n\n"
                 f"[red bold]This cannot be undone.[/red bold]"
-            ),
+            )
+
+        self.app.push_screen(
+            ConfirmModal(modal_body),
             lambda ok: self._do_sell_all() if ok else None,
         )
 
