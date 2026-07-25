@@ -278,6 +278,7 @@ class ConfirmModal(ModalScreen):
     ConfirmModal Horizontal { height: 3; align: center middle; }
     ConfirmModal Button { margin: 0 2; min-width: 10; }
     """
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, msg: str) -> None:
         super().__init__()
@@ -298,6 +299,9 @@ class ConfirmModal(ModalScreen):
     def _no(self) -> None:
         self.dismiss(False)
 
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
 
 class TokenPickerModal(ModalScreen):
     DEFAULT_CSS = """
@@ -315,6 +319,7 @@ class TokenPickerModal(ModalScreen):
     TokenPickerModal Horizontal { height: 3; align: right middle; }
     TokenPickerModal Button { margin-left: 1; min-width: 10; }
     """
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, action: str = "select", tokens: Optional[list] = None) -> None:
         super().__init__()
@@ -356,6 +361,9 @@ class TokenPickerModal(ModalScreen):
     def _cancel(self) -> None:
         self.dismiss(None)
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
     @on(Button.Pressed, "#tk-select")
     def _select(self) -> None:
         manual = self.query_one("#tk-manual", Input).value.strip()
@@ -390,6 +398,8 @@ class TokenListModal(ModalScreen):
       • Add a token manually by mint address (+ optional symbol)
       • Bulk-load every token from the created_tokens registry in one go
     """
+
+    BINDINGS = [("escape", "cancel", "Close")]
 
     DEFAULT_CSS = """
     TokenListModal { align: center middle; }
@@ -552,6 +562,9 @@ class TokenListModal(ModalScreen):
 
     @on(Button.Pressed, "#btn-tl-close")
     def on_close(self) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
         self.dismiss(None)
 
 
