@@ -749,11 +749,12 @@ class TokenCreator:
         Returns a TxResult (same shape as sign_and_send) so create_token() can
         treat both paths identically.
         """
-        from .jito_bundle import build_tip_tx, get_endpoint, poll_bundle_statuses, send_bundle
+        from .jito_bundle import build_tip_tx, get_endpoint_async, poll_bundle_statuses, send_bundle
         from .solana_tx import TxResult, sign_tx
         from solana.rpc.commitment import Confirmed as CommitmentConfirmed
 
-        endpoint     = get_endpoint(config.jito_endpoint)
+        # 4C: resolve endpoint — runs latency probe if JITO_ENDPOINT=auto
+        endpoint     = await get_endpoint_async(config.jito_endpoint)
         tip_lamports = int(config.jito_tip_sol * 1_000_000_000)
 
         logger.info(

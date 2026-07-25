@@ -406,6 +406,7 @@ class TokenSeller:
         dev_wallet=None,
         fund_wallets: Optional[List] = None,
         slippage_bps: Optional[int] = None,
+        on_progress=None,
     ) -> Dict[str, Any]:
         """
         Sell all tokens across every configured wallet using Jito bundles.
@@ -425,7 +426,7 @@ class TokenSeller:
         """
         from .jito_bundle import (
             MAX_TXS_PER_BUNDLE, BundleResult, build_tip_tx,
-            get_endpoint, poll_bundle_statuses, send_bundle,
+            get_endpoint_async, poll_bundle_statuses, send_bundle,
         )
         from .solana_tx import sign_tx
         from solana.rpc.commitment import Confirmed as CommitmentConfirmed
@@ -451,7 +452,8 @@ class TokenSeller:
                     "total": len(dry_results), "successful": len(dry_results),
                     "failed": 0, "jito": True}
 
-        endpoint     = get_endpoint(config.jito_endpoint)
+        # 4C: async endpoint resolution — probes all regions if JITO_ENDPOINT=auto
+        endpoint     = await get_endpoint_async(config.jito_endpoint)
         tip_lamports = int(config.jito_tip_sol * 1_000_000_000)
 
         logger.info(f"[JITO] Selling {token_mint[:8]}…  "
@@ -537,7 +539,10 @@ class TokenSeller:
             bundle_ids    = [b[0] for b in submitted_bundles]
             bundle_wallet_map = {b[0]: b[1] for b in submitted_bundles}
 
-            statuses = await poll_bundle_statuses(bundle_ids, endpoint)
+            # 4B: pass streaming callback so TUI footer updates during polling
+            statuses = await poll_bundle_statuses(
+                bundle_ids, endpoint, on_status=on_progress
+            )
 
             for bid, wallets in bundle_wallet_map.items():
                 status = statuses.get(bid, BundleResult(bundle_id=bid, success=False,

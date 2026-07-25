@@ -1068,11 +1068,17 @@ class MonitorPane(Container):
                     "[bold yellow]⚡ Jito bundle selling…[/bold yellow]   "
                     "[dim]●[/dim] atomic — all land or none do"
                 )
+
+                # 4B: callback that streams live poll status into the footer
+                def _jito_status(msg: str) -> None:
+                    footer.update(msg)
+
                 summary = await seller.jito_wave_sell(
                     token_mint   = self._token_mint,
                     dev_wallet   = wallet_manager.dev_wallet,
                     fund_wallets = wallet_manager.fund_wallets,
                     slippage_bps = config.default_slippage_bps,
+                    on_progress  = _jito_status,
                 )
             else:
                 footer.update(
