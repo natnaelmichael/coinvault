@@ -1059,39 +1059,60 @@ class MonitorPane(Container):
 
     @work(exclusive=True)
     async def _do_sell_all(self) -> None:
-        """Worker: two-wave token sell followed by SOL collection."""
+        """Worker: sell all tokens then collect SOL (Jito bundle or two-wave RPC)."""
         footer = self.query_one("#mon-footer", Static)
         seller = get_token_seller(wallet_manager.rpc_client)
         try:
-            footer.update(
-                "[yellow]🔥 Wave 1 selling…[/yellow]   "
-                "[dim]Ctrl+C[/dim] back to menu   "
-                "[dim]●[/dim] PumpPortal WebSocket"
-            )
-            summary = await seller.wave_sell_all(
-                token_mint   = self._token_mint,
-                dev_wallet   = wallet_manager.dev_wallet,
-                fund_wallets = wallet_manager.fund_wallets,
-                wave_size    = config.sell_wave_size,
-            )
+            if config.jito_enabled:
+                footer.update(
+                    "[bold yellow]⚡ Jito bundle selling…[/bold yellow]   "
+                    "[dim]●[/dim] atomic — all land or none do"
+                )
+                summary = await seller.jito_wave_sell(
+                    token_mint   = self._token_mint,
+                    dev_wallet   = wallet_manager.dev_wallet,
+                    fund_wallets = wallet_manager.fund_wallets,
+                    slippage_bps = config.default_slippage_bps,
+                )
+            else:
+                footer.update(
+                    "[yellow]🔥 Wave 1 selling…[/yellow]   "
+                    "[dim]Ctrl+C[/dim] back to menu   "
+                    "[dim]●[/dim] PumpPortal WebSocket"
+                )
+                summary = await seller.wave_sell_all(
+                    token_mint   = self._token_mint,
+                    dev_wallet   = wallet_manager.dev_wallet,
+                    fund_wallets = wallet_manager.fund_wallets,
+                    wave_size    = config.sell_wave_size,
+                )
 
-            w1      = summary["wave1_results"]
-            w2      = summary["wave2_results"]
-            w1_ok   = sum(1 for r in w1 if r.success)
-            w2_ok   = sum(1 for r in w2 if r.success)
             wr      = summary.get("withdraw_result", {})
             ok      = summary["successful"]
             total   = summary["total"]
             sol_col = wr.get("total_withdrawn", 0.0)
+            sev     = "information" if ok == total else "warning"
 
-            sev = "information" if ok == total else "warning"
-            self.notify(
-                f"Wave 1: {w1_ok}/{len(w1)}  Wave 2: {w2_ok}/{len(w2)}\n"
-                f"SOL collected: {sol_col:.4f}",
-                title="🔥 Sell All Complete",
-                severity=sev,
-                timeout=8,
-            )
+            if summary.get("jito"):
+                self.notify(
+                    f"Bundle sells confirmed: {ok}/{total}\n"
+                    f"SOL collected: {sol_col:.4f}",
+                    title="⚡ Jito Sell Complete",
+                    severity=sev,
+                    timeout=8,
+                )
+            else:
+                w1    = summary["wave1_results"]
+                w2    = summary["wave2_results"]
+                w1_ok = sum(1 for r in w1 if r.success)
+                w2_ok = sum(1 for r in w2 if r.success)
+                self.notify(
+                    f"Wave 1: {w1_ok}/{len(w1)}  Wave 2: {w2_ok}/{len(w2)}\n"
+                    f"SOL collected: {sol_col:.4f}",
+                    title="🔥 Sell All Complete",
+                    severity=sev,
+                    timeout=8,
+                )
         except Exception as exc:
             self.notify(f"Sell error: {exc}", severity="error", timeout=10)
         finally:

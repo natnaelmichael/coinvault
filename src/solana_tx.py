@@ -15,6 +15,7 @@ from typing import List, Optional
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solana.rpc.types import TxOpts
+from solders.hash import Hash
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
@@ -27,6 +28,24 @@ class TxResult:
     confirmed: bool = False
     signature: Optional[str] = None
     error:     Optional[str] = None
+
+
+def sign_tx(tx_bytes: bytes, signers: List[Keypair], blockhash: Hash) -> bytes:
+    """
+    Deserialise *tx_bytes* as a VersionedTransaction, apply *blockhash*, sign
+    with every keypair in *signers*, and return the raw signed bytes.
+
+    This is the low-level primitive used by Jito bundle construction: you call
+    it for each transaction in the bundle (all sharing the SAME blockhash),
+    then POST the collected bytes to the block engine in one shot.
+
+    For the standard single-transaction path, use sign_and_send() instead —
+    it fetches its own blockhash and handles submission + confirmation.
+    """
+    tx = VersionedTransaction.from_bytes(tx_bytes)
+    tx.message.recent_blockhash = blockhash
+    tx.sign(signers)
+    return bytes(tx)
 
 
 async def sign_and_send(
@@ -42,12 +61,13 @@ async def sign_and_send(
     blockhash, sign with every keypair in *signers*, submit, and poll for
     confirmation.
 
+    Internally calls sign_tx() after fetching a fresh blockhash, so both paths
+    share the same signing logic.
+
     Args:
         client:               Solana AsyncClient connected to the target cluster.
         tx_bytes:             Raw serialised VersionedTransaction bytes.
         signers:              Ordered list of Keypairs that must sign the transaction.
-                              The first signer is also used to fetch the fee-payer's
-                              blockhash context if needed.
         max_confirm_attempts: How many times to poll for confirmation.
         confirm_delay:        Seconds between confirmation polls.
 
@@ -55,19 +75,12 @@ async def sign_and_send(
         TxResult with success/confirmed flags, the base58 signature, or an error.
     """
     try:
-        # ── 1. Deserialise ─────────────────────────────────────────────────────
-        tx = VersionedTransaction.from_bytes(tx_bytes)
-
-        # ── 2. Refresh the blockhash so the tx doesn't expire ─────────────────
+        # ── 1 & 2. Fetch blockhash, sign ──────────────────────────────────────
         bh_resp = await client.get_latest_blockhash(commitment=Confirmed)
         recent_blockhash = bh_resp.value.blockhash
-        tx.message.recent_blockhash = recent_blockhash
+        raw = sign_tx(tx_bytes, signers, recent_blockhash)
 
-        # ── 3. Sign ────────────────────────────────────────────────────────────
-        tx.sign(signers)
-
-        # ── 4. Serialise & send ────────────────────────────────────────────────
-        raw = bytes(tx)
+        # ── 3. Serialise & send ────────────────────────────────────────────────
         send_resp = await client.send_raw_transaction(
             raw,
             opts=TxOpts(skip_preflight=False, preflight_commitment=Confirmed),

@@ -379,13 +379,11 @@ class TokenCreator:
             self._ipfs_dht_provide(api, meta_cid, "metadata")
         )
 
-        # Stage 2 — gateway verification for metadata; use the same gateway
-        # that successfully served the image (already confirmed reachable).
+        # Stage 2 — gateway verification for metadata
         if config.ipfs_gateway_verify:
-            working_gateway = image_live_url.rsplit("/", 1)[0]
             logger.info("[LOCAL IPFS] Stage 2 — verifying metadata on public gateway...")
             meta_live_url = await self._verify_on_gateway(
-                meta_cid, label="metadata", gateway_base=working_gateway
+                meta_cid, label="metadata"
             )
             if not meta_live_url:
                 logger.error(
@@ -686,15 +684,22 @@ class TokenCreator:
                 logger.error(f"  Raw response bytes:      {response.content!r}")
                 return None
 
-            # Deserialize, refresh blockhash, sign, send, and confirm —
-            # shared pipeline (see solana_tx.py). Preserves the
-            # blockhash-refresh-before-signing behavior exactly as before.
-            logger.info("Sending token creation transaction...")
-            result = await sign_and_send(
-                self.rpc_client,
-                response.content,
-                signers=[mint_keypair, creator_wallet.keypair],
-            )
+            # Sign, submit, and confirm — via Jito bundle (atomic, anti-snipe)
+            # or standard RPC send depending on config.
+            if config.jito_enabled:
+                logger.info("[JITO] Submitting creation as Jito bundle…")
+                result = await self._jito_create(
+                    response.content,
+                    signers=[mint_keypair, creator_wallet.keypair],
+                    creator_wallet=creator_wallet,
+                )
+            else:
+                logger.info("Sending token creation transaction...")
+                result = await sign_and_send(
+                    self.rpc_client,
+                    response.content,
+                    signers=[mint_keypair, creator_wallet.keypair],
+                )
 
             if result.success and result.confirmed:
                 logger.info(f"✓ Token created! Signature: {result.signature}")
@@ -722,6 +727,70 @@ class TokenCreator:
             notification_manager.error_alert("Token Creation Failed", str(e))
             return None
 
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Jito creation helper
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _jito_create(
+        self,
+        tx_bytes: bytes,
+        signers,
+        creator_wallet,
+    ):
+        """
+        Wrap a PumpPortal create transaction in a two-transaction Jito bundle:
+            [tip_tx, create_tx]
+
+        The tip and the create share the same blockhash → they land in the same
+        slot or neither does, preventing front-runners from sniping between the
+        mint instruction and the initial buy.
+
+        Returns a TxResult (same shape as sign_and_send) so create_token() can
+        treat both paths identically.
+        """
+        from .jito_bundle import build_tip_tx, get_endpoint, poll_bundle_statuses, send_bundle
+        from .solana_tx import TxResult, sign_tx
+        from solana.rpc.commitment import Confirmed as CommitmentConfirmed
+
+        endpoint     = get_endpoint(config.jito_endpoint)
+        tip_lamports = int(config.jito_tip_sol * 1_000_000_000)
+
+        logger.info(
+            f"[JITO] Create bundle — tip {config.jito_tip_sol} SOL  "
+            f"endpoint={config.jito_endpoint}"
+        )
+
+        # Shared blockhash — both transactions must use the same value.
+        bh_resp   = await self.rpc_client.get_latest_blockhash(commitment=CommitmentConfirmed)
+        blockhash = bh_resp.value.blockhash
+
+        # Sign the create transaction (VersionedTransaction from PumpPortal).
+        signed_create = sign_tx(tx_bytes, list(signers), blockhash)
+
+        # Build the tip transaction (legacy SystemProgram.transfer).
+        tip_bytes = build_tip_tx(creator_wallet.keypair, tip_lamports, blockhash)
+
+        # Submit bundle: tip first, then the create tx.
+        bundle_result = await send_bundle([tip_bytes, signed_create], endpoint)
+        if not bundle_result.success or not bundle_result.bundle_id:
+            logger.error(f"[JITO] Bundle submission failed: {bundle_result.error}")
+            return TxResult(success=False, confirmed=False, error=bundle_result.error)
+
+        # Poll until confirmed or timed out.
+        logger.info(f"[JITO] Bundle {bundle_result.bundle_id[:20]}… submitted — polling…")
+        statuses = await poll_bundle_statuses([bundle_result.bundle_id], endpoint)
+        status   = statuses[bundle_result.bundle_id]
+
+        if status.confirmed and status.success:
+            # tx_signatures: [tip_sig, create_sig] — we want index 1
+            sig = status.tx_signatures[1] if len(status.tx_signatures) > 1 else "unknown"
+            logger.info(f"[JITO] ✓ Create bundle confirmed — sig {sig[:16]}…")
+            return TxResult(success=True, confirmed=True, signature=sig)
+
+        err = status.error or "bundle did not confirm"
+        logger.error(f"[JITO] ✗ Create bundle not confirmed: {err}")
+        return TxResult(success=False, confirmed=False, error=err)
 
     # ─────────────────────────────────────────────────────────────────────────
     async def probe_pumpportal(

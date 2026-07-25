@@ -179,6 +179,15 @@ class Config:
         # UX — automatically open pump.fun in the browser after token creation
         self.auto_open_browser = os.getenv("AUTO_OPEN_BROWSER", "true").lower() == "true"
 
+        # ── Jito MEV bundles ──────────────────────────────────────────────────
+        # When enabled, sells and token creation use atomic Jito bundles instead
+        # of individual RPC sends — all transactions land in the same block or
+        # none do.  Requires a tip payment per bundle.
+        self.jito_enabled  = os.getenv("JITO_ENABLED",  "false").lower() == "true"
+        self.jito_tip_sol  = self._float_env("JITO_TIP_SOL",  0.001)
+        # Regional block engine — one of: mainnet, amsterdam, ny, tokyo, frankfurt
+        self.jito_endpoint = os.getenv("JITO_ENDPOINT", "mainnet")
+
         # Two-wave sell: total wallet slots in wave 1 (dev wallet counts as 1).
         # Default 4 = dev + 3 fund wallets.  Remaining fund wallets fire in wave 2.
         self.sell_wave_size = self._int_env("SELL_WAVE_SIZE", 4)

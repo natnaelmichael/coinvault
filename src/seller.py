@@ -400,6 +400,189 @@ class TokenSeller:
             "failed":          total - ok,
         }
 
+    async def jito_wave_sell(
+        self,
+        token_mint: str,
+        dev_wallet=None,
+        fund_wallets: Optional[List] = None,
+        slippage_bps: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Sell all tokens across every configured wallet using Jito bundles.
+
+        Instead of sending transactions individually (which can be front-run),
+        this method:
+          1. Fetches all sell transactions from PumpPortal in parallel.
+          2. Fetches ONE shared blockhash (applied to every transaction).
+          3. Groups signed sell txs into bundles of up to MAX_TXS_PER_BUNDLE=4,
+             each bundle prefixed with a tip transaction.
+          4. Posts each bundle to the Jito block engine — all txs in a bundle
+             land in the same block or none do.
+          5. Polls for confirmation, then runs Phase 2 SOL collection.
+
+        Returns the same summary dict shape as wave_sell_all so the TUI worker
+        can consume it identically.
+        """
+        from .jito_bundle import (
+            MAX_TXS_PER_BUNDLE, BundleResult, build_tip_tx,
+            get_endpoint, poll_bundle_statuses, send_bundle,
+        )
+        from .solana_tx import sign_tx
+        from solana.rpc.commitment import Confirmed as CommitmentConfirmed
+
+        fund_wallets = fund_wallets or []
+        all_wallets  = ([dev_wallet] if dev_wallet else []) + fund_wallets
+        tip_wallet   = dev_wallet or (fund_wallets[0] if fund_wallets else None)
+
+        if not all_wallets or tip_wallet is None:
+            return {"wave1_results": [], "wave2_results": [], "withdraw_result": {},
+                    "total": 0, "successful": 0, "failed": 0, "jito": True}
+
+        if config.dry_run_mode:
+            logger.info(f"[DRY RUN][JITO] Would bundle-sell {token_mint[:8]}… "
+                        f"across {len(all_wallets)} wallet(s)")
+            dry_results = [
+                SellResult(wallet=w, success=True,
+                           signature=f"DRY_RUN_JITO_{str(w.public_key)[:8]}")
+                for w in all_wallets
+            ]
+            return {"wave1_results": dry_results, "wave2_results": [],
+                    "withdraw_result": {"total_withdrawn": 0.0, "dry_run": True},
+                    "total": len(dry_results), "successful": len(dry_results),
+                    "failed": 0, "jito": True}
+
+        endpoint     = get_endpoint(config.jito_endpoint)
+        tip_lamports = int(config.jito_tip_sol * 1_000_000_000)
+
+        logger.info(f"[JITO] Selling {token_mint[:8]}…  "
+                    f"wallets={len(all_wallets)}  tip={config.jito_tip_sol} SOL  "
+                    f"endpoint={config.jito_endpoint}")
+
+        # ── 1. Fetch all sell transactions from PumpPortal in parallel ────────
+        async def _fetch_sell_tx(wallet):
+            sell_data = {
+                "publicKey":        str(wallet.public_key),
+                "action":           "sell",
+                "mint":             token_mint,
+                "denominatedInSol": "false",
+                "slippage":         (slippage_bps or config.default_slippage_bps) / 100,
+                "priorityFee":      0.0005,
+                "pool":             "pump",
+            }
+            resp = await post_with_retry(
+                self.SELL_API_URL,
+                json_body=sell_data,
+                headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(f"PumpPortal {resp.status_code}: {resp.text[:120]}")
+            return resp.content
+
+        fetch_raw = await asyncio.gather(
+            *[_fetch_sell_tx(w) for w in all_wallets],
+            return_exceptions=True,
+        )
+
+        # ── 2. Fetch ONE shared blockhash for the entire sell operation ───────
+        bh_resp   = await self.rpc_client.get_latest_blockhash(commitment=CommitmentConfirmed)
+        blockhash = bh_resp.value.blockhash
+
+        # ── 3. Sign each successfully-fetched transaction ─────────────────────
+        good_pairs: List = []    # (wallet, signed_bytes)
+        failed_results: List[SellResult] = []
+
+        for wallet, result in zip(all_wallets, fetch_raw):
+            if isinstance(result, Exception):
+                logger.error(f"{wallet.label}: failed to fetch sell tx — {result}")
+                failed_results.append(SellResult(wallet=wallet, success=False, error=str(result)))
+            else:
+                try:
+                    raw = sign_tx(result, [wallet.keypair], blockhash)
+                    good_pairs.append((wallet, raw))
+                except Exception as exc:
+                    logger.error(f"{wallet.label}: sign failed — {exc}")
+                    failed_results.append(SellResult(wallet=wallet, success=False, error=str(exc)))
+
+        # ── 4. Group into bundles and submit ──────────────────────────────────
+        chunks = [
+            good_pairs[i:i + MAX_TXS_PER_BUNDLE]
+            for i in range(0, len(good_pairs), MAX_TXS_PER_BUNDLE)
+        ]
+        logger.info(f"[JITO] {len(good_pairs)} signed tx(s) → {len(chunks)} bundle(s)")
+
+        submitted_bundles: List[tuple] = []   # (bundle_id, [wallet, ...])
+
+        for idx, chunk in enumerate(chunks):
+            tip_tx     = build_tip_tx(tip_wallet.keypair, tip_lamports, blockhash)
+            bundle_txs = [tip_tx] + [raw for _, raw in chunk]
+
+            logger.info(f"[JITO] Submitting bundle {idx + 1}/{len(chunks)} "
+                        f"({len(chunk)} sell tx(s) + 1 tip)…")
+            br = await send_bundle(bundle_txs, endpoint)
+
+            if br.success and br.bundle_id:
+                submitted_bundles.append((br.bundle_id, [w for w, _ in chunk]))
+            else:
+                logger.error(f"[JITO] Bundle {idx + 1} submission failed: {br.error}")
+                for w, _ in chunk:
+                    failed_results.append(SellResult(
+                        wallet=w, success=False,
+                        error=br.error or "bundle submission failed",
+                    ))
+
+        # ── 5. Poll for confirmation ──────────────────────────────────────────
+        sell_results: List[SellResult] = list(failed_results)
+
+        if submitted_bundles:
+            bundle_ids    = [b[0] for b in submitted_bundles]
+            bundle_wallet_map = {b[0]: b[1] for b in submitted_bundles}
+
+            statuses = await poll_bundle_statuses(bundle_ids, endpoint)
+
+            for bid, wallets in bundle_wallet_map.items():
+                status = statuses.get(bid, BundleResult(bundle_id=bid, success=False,
+                                                        error="status unknown"))
+                for i, wallet in enumerate(wallets):
+                    # tx_signatures: [tip_sig, sell_sig_0, sell_sig_1, …]
+                    sig = (status.tx_signatures[i + 1]
+                           if len(status.tx_signatures) > i + 1 else None)
+                    sell_results.append(SellResult(
+                        wallet=wallet,
+                        success=status.success and status.confirmed,
+                        signature=sig,
+                        error=(status.error
+                               if not (status.success and status.confirmed) else None),
+                    ))
+
+        # ── 6. Phase 2 — SOL collection ───────────────────────────────────────
+        withdraw_result: Dict[str, Any] = {}
+        if dev_wallet and fund_wallets:
+            logger.info("[JITO] Phase 2 — collecting SOL → dev wallet…")
+            withdraw_result = await self.withdraw_all_sol(fund_wallets, dev_wallet)
+
+        ok    = sum(1 for r in sell_results if r.success)
+        total = len(sell_results)
+        logger.info(f"[JITO] Sell-all complete: {ok}/{total} confirmed")
+
+        if ok > 0:
+            notification_manager.notify(
+                "🔥 Jito Bundle Sell Complete",
+                f"{ok}/{total} sells confirmed  "
+                f"SOL collected: {withdraw_result.get('total_withdrawn', 0):.4f}",
+                "normal",
+                "success",
+            )
+
+        return {
+            "wave1_results":   sell_results,
+            "wave2_results":   [],
+            "withdraw_result": withdraw_result,
+            "total":           total,
+            "successful":      ok,
+            "failed":          total - ok,
+            "jito":            True,
+        }
+
     async def withdraw_all_sol(
         self,
         from_wallets: List,
