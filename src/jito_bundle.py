@@ -61,6 +61,11 @@ JITO_ENDPOINTS: Dict[str, str] = {
 # Maximum sell-transaction slots per bundle (1 slot reserved for the tip tx).
 MAX_TXS_PER_BUNDLE: int = 4
 
+# Conservative validity window for a Solana blockhash.
+# The network drops txs after ~150 slots (~60 s on mainnet), but variance
+# means it can be as short as 60 s.  We use 55 s to give ourselves a buffer.
+BLOCKHASH_VALIDITY_SECONDS: float = 55.0
+
 _HTTP_TIMEOUT = 15.0   # seconds
 
 # ── 4C: Cached fastest endpoint (set once by pick_fastest_endpoint) ───────────
@@ -83,6 +88,14 @@ class BundleResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def scale_tip(current_lamports: int, multiplier: float, max_lamports: int) -> int:
+    """
+    Multiply *current_lamports* by *multiplier*, capping at *max_lamports*.
+    Used by the 4A retry loop to escalate the tip on each failed attempt.
+    """
+    return min(int(current_lamports * multiplier), max_lamports)
+
 
 def get_endpoint(region: str) -> str:
     """

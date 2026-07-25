@@ -4,6 +4,7 @@ Handles selling tokens and withdrawing funds
 """
 
 import asyncio
+import time as _time
 from typing import List, Optional, Dict, Any
 from solders.transaction import Transaction
 from solders.message import Message
@@ -411,22 +412,24 @@ class TokenSeller:
         """
         Sell all tokens across every configured wallet using Jito bundles.
 
-        Instead of sending transactions individually (which can be front-run),
-        this method:
-          1. Fetches all sell transactions from PumpPortal in parallel.
-          2. Fetches ONE shared blockhash (applied to every transaction).
-          3. Groups signed sell txs into bundles of up to MAX_TXS_PER_BUNDLE=4,
-             each bundle prefixed with a tip transaction.
-          4. Posts each bundle to the Jito block engine — all txs in a bundle
-             land in the same block or none do.
-          5. Polls for confirmation, then runs Phase 2 SOL collection.
+        Includes 4A tip auto-scaling with blockhash-aware retry (approach B):
+          • On confirmation timeout, multiply the tip and retry only the
+            wallets whose bundles did not confirm.
+          • If the original blockhash is still within BLOCKHASH_VALIDITY_SECONDS,
+            the already-signed sell transactions are reused — only the tip tx
+            is rebuilt with the higher amount.  This saves a PumpPortal round-
+            trip on the first retry.
+          • Once the blockhash expires, all sell txs are re-fetched from
+            PumpPortal and re-signed with a fresh blockhash.
+          • Hard-rejected bundles and confirmed bundles are never re-submitted.
 
-        Returns the same summary dict shape as wave_sell_all so the TUI worker
-        can consume it identically.
+        Returns the same summary dict shape as wave_sell_all.
         """
         from .jito_bundle import (
-            MAX_TXS_PER_BUNDLE, BundleResult, build_tip_tx,
-            get_endpoint_async, poll_bundle_statuses, send_bundle,
+            BLOCKHASH_VALIDITY_SECONDS,
+            MAX_TXS_PER_BUNDLE, BundleResult,
+            build_tip_tx, get_endpoint_async,
+            poll_bundle_statuses, scale_tip, send_bundle,
         )
         from .solana_tx import sign_tx
         from solana.rpc.commitment import Confirmed as CommitmentConfirmed
@@ -452,15 +455,18 @@ class TokenSeller:
                     "total": len(dry_results), "successful": len(dry_results),
                     "failed": 0, "jito": True}
 
-        # 4C: async endpoint resolution — probes all regions if JITO_ENDPOINT=auto
+        # 4C: resolve endpoint — latency probe if JITO_ENDPOINT=auto
         endpoint     = await get_endpoint_async(config.jito_endpoint)
         tip_lamports = int(config.jito_tip_sol * 1_000_000_000)
+        max_tip_lam  = int(config.jito_max_tip_sol * 1_000_000_000)
 
-        logger.info(f"[JITO] Selling {token_mint[:8]}…  "
-                    f"wallets={len(all_wallets)}  tip={config.jito_tip_sol} SOL  "
-                    f"endpoint={config.jito_endpoint}")
+        logger.info(
+            f"[JITO] Selling {token_mint[:8]}…  wallets={len(all_wallets)}  "
+            f"tip={config.jito_tip_sol} SOL  max_tip={config.jito_max_tip_sol} SOL  "
+            f"max_retries={config.jito_max_retries}"
+        )
 
-        # ── 1. Fetch all sell transactions from PumpPortal in parallel ────────
+        # ── PumpPortal fetch helper (reused on re-fetch retries) ──────────────
         async def _fetch_sell_tx(wallet):
             sell_data = {
                 "publicKey":        str(wallet.public_key),
@@ -480,93 +486,186 @@ class TokenSeller:
                 raise RuntimeError(f"PumpPortal {resp.status_code}: {resp.text[:120]}")
             return resp.content
 
-        fetch_raw = await asyncio.gather(
-            *[_fetch_sell_tx(w) for w in all_wallets],
-            return_exceptions=True,
-        )
+        # ── Accumulate results across all attempts ────────────────────────────
+        confirmed_results: List[SellResult] = []
+        final_failed:      List[SellResult] = []
 
-        # ── 2. Fetch ONE shared blockhash for the entire sell operation ───────
-        bh_resp   = await self.rpc_client.get_latest_blockhash(commitment=CommitmentConfirmed)
-        blockhash = bh_resp.value.blockhash
+        # State carried across retry iterations
+        wallets_to_attempt = list(all_wallets)
+        signed_pairs: List[tuple] = []        # (wallet, signed_bytes)
+        blockhash             = None
+        blockhash_fetched_at  = 0.0           # time.monotonic() timestamp
 
-        # ── 3. Sign each successfully-fetched transaction ─────────────────────
-        good_pairs: List = []    # (wallet, signed_bytes)
-        failed_results: List[SellResult] = []
+        # ── 4A outer retry loop ───────────────────────────────────────────────
+        for retry_num in range(config.jito_max_retries + 1):
+            if not wallets_to_attempt:
+                break
 
-        for wallet, result in zip(all_wallets, fetch_raw):
-            if isinstance(result, Exception):
-                logger.error(f"{wallet.label}: failed to fetch sell tx — {result}")
-                failed_results.append(SellResult(wallet=wallet, success=False, error=str(result)))
+            # Scale tip on every retry after the first
+            if retry_num > 0:
+                tip_lamports = scale_tip(tip_lamports, config.jito_tip_multiplier, max_tip_lam)
+                tip_sol      = tip_lamports / 1_000_000_000
+                retry_msg    = (
+                    f"[bold yellow]⚡ Jito:[/bold yellow] "
+                    f"retry {retry_num}/{config.jito_max_retries}  "
+                    f"tip → {tip_sol:.4f} SOL"
+                )
+                logger.info(f"[JITO] Retry {retry_num}/{config.jito_max_retries}  "
+                            f"tip={tip_sol:.4f} SOL  wallets={len(wallets_to_attempt)}")
+                if on_progress:
+                    on_progress(retry_msg)
+
+            # ── Decide whether to re-fetch from PumpPortal ───────────────────
+            elapsed    = _time.monotonic() - blockhash_fetched_at
+            need_fresh = (blockhash is None) or (elapsed >= BLOCKHASH_VALIDITY_SECONDS)
+
+            if need_fresh:
+                if retry_num > 0:
+                    logger.info(
+                        f"[JITO] Blockhash expired ({elapsed:.0f}s ≥ "
+                        f"{BLOCKHASH_VALIDITY_SECONDS:.0f}s) — "
+                        f"re-fetching {len(wallets_to_attempt)} tx(s) from PumpPortal…"
+                    )
+                fetch_raw = await asyncio.gather(
+                    *[_fetch_sell_tx(w) for w in wallets_to_attempt],
+                    return_exceptions=True,
+                )
+                bh_resp              = await self.rpc_client.get_latest_blockhash(
+                                            commitment=CommitmentConfirmed)
+                blockhash            = bh_resp.value.blockhash
+                blockhash_fetched_at = _time.monotonic()
+
+                new_pairs: List[tuple] = []
+                for wallet, result in zip(wallets_to_attempt, fetch_raw):
+                    if isinstance(result, Exception):
+                        logger.error(f"{wallet.label}: fetch failed — {result}")
+                        final_failed.append(SellResult(wallet=wallet, success=False,
+                                                       error=str(result)))
+                    else:
+                        try:
+                            raw = sign_tx(result, [wallet.keypair], blockhash)
+                            new_pairs.append((wallet, raw))
+                        except Exception as exc:
+                            logger.error(f"{wallet.label}: sign failed — {exc}")
+                            final_failed.append(SellResult(wallet=wallet, success=False,
+                                                           error=str(exc)))
+                signed_pairs = new_pairs
+                ok_pubkeys   = {str(w.public_key) for w, _ in signed_pairs}
+                wallets_to_attempt = [w for w in wallets_to_attempt
+                                      if str(w.public_key) in ok_pubkeys]
             else:
-                try:
-                    raw = sign_tx(result, [wallet.keypair], blockhash)
-                    good_pairs.append((wallet, raw))
-                except Exception as exc:
-                    logger.error(f"{wallet.label}: sign failed — {exc}")
-                    failed_results.append(SellResult(wallet=wallet, success=False, error=str(exc)))
+                logger.info(
+                    f"[JITO] Blockhash still valid ({elapsed:.0f}s < "
+                    f"{BLOCKHASH_VALIDITY_SECONDS:.0f}s) — "
+                    f"reusing {len(signed_pairs)} signed tx(s), rebuilding tip only…"
+                )
+                # signed_pairs already contains only timed-out wallets from the
+                # previous iteration — no re-fetch needed.
 
-        # ── 4. Group into bundles and submit ──────────────────────────────────
-        chunks = [
-            good_pairs[i:i + MAX_TXS_PER_BUNDLE]
-            for i in range(0, len(good_pairs), MAX_TXS_PER_BUNDLE)
-        ]
-        logger.info(f"[JITO] {len(good_pairs)} signed tx(s) → {len(chunks)} bundle(s)")
+            if not signed_pairs:
+                logger.error(f"[JITO] No signable transactions left (retry {retry_num})")
+                break
 
-        submitted_bundles: List[tuple] = []   # (bundle_id, [wallet, ...])
+            # ── Submit bundles ────────────────────────────────────────────────
+            chunks = [signed_pairs[i:i + MAX_TXS_PER_BUNDLE]
+                      for i in range(0, len(signed_pairs), MAX_TXS_PER_BUNDLE)]
+            retry_tag = f" [RETRY {retry_num}]" if retry_num > 0 else ""
+            logger.info(f"[JITO]{retry_tag} {len(signed_pairs)} tx(s) → "
+                        f"{len(chunks)} bundle(s)  tip={tip_lamports/1e9:.4f} SOL")
 
-        for idx, chunk in enumerate(chunks):
-            tip_tx     = build_tip_tx(tip_wallet.keypair, tip_lamports, blockhash)
-            bundle_txs = [tip_tx] + [raw for _, raw in chunk]
+            submitted_bundles: List[tuple] = []
 
-            logger.info(f"[JITO] Submitting bundle {idx + 1}/{len(chunks)} "
-                        f"({len(chunk)} sell tx(s) + 1 tip)…")
-            br = await send_bundle(bundle_txs, endpoint)
+            for idx, chunk in enumerate(chunks):
+                tip_tx     = build_tip_tx(tip_wallet.keypair, tip_lamports, blockhash)
+                bundle_txs = [tip_tx] + [raw for _, raw in chunk]
+                logger.info(f"[JITO] Submitting bundle {idx + 1}/{len(chunks)} "
+                            f"({len(chunk)} sell tx(s) + 1 tip){retry_tag}…")
+                br = await send_bundle(bundle_txs, endpoint)
 
-            if br.success and br.bundle_id:
-                submitted_bundles.append((br.bundle_id, [w for w, _ in chunk]))
-            else:
-                logger.error(f"[JITO] Bundle {idx + 1} submission failed: {br.error}")
-                for w, _ in chunk:
-                    failed_results.append(SellResult(
-                        wallet=w, success=False,
-                        error=br.error or "bundle submission failed",
-                    ))
+                if br.success and br.bundle_id:
+                    submitted_bundles.append((br.bundle_id, [w for w, _ in chunk]))
+                else:
+                    # Hard rejection — block engine refused the bundle; no retry
+                    logger.error(f"[JITO] Bundle {idx + 1} rejected: {br.error}")
+                    for w, _ in chunk:
+                        final_failed.append(SellResult(
+                            wallet=w, success=False,
+                            error=br.error or "bundle rejected",
+                        ))
 
-        # ── 5. Poll for confirmation ──────────────────────────────────────────
-        sell_results: List[SellResult] = list(failed_results)
+            # ── Poll for confirmation ─────────────────────────────────────────
+            round_results: List[SellResult] = []
 
-        if submitted_bundles:
-            bundle_ids    = [b[0] for b in submitted_bundles]
-            bundle_wallet_map = {b[0]: b[1] for b in submitted_bundles}
+            if submitted_bundles:
+                bundle_ids        = [b[0] for b in submitted_bundles]
+                bundle_wallet_map = {b[0]: b[1] for b in submitted_bundles}
 
-            # 4B: pass streaming callback so TUI footer updates during polling
-            statuses = await poll_bundle_statuses(
-                bundle_ids, endpoint, on_status=on_progress
+                statuses = await poll_bundle_statuses(
+                    bundle_ids, endpoint, on_status=on_progress  # 4B streaming
+                )
+
+                for bid, wallets_in_bundle in bundle_wallet_map.items():
+                    status = statuses.get(
+                        bid,
+                        BundleResult(bundle_id=bid, success=False, error="status unknown"),
+                    )
+                    for i, wallet in enumerate(wallets_in_bundle):
+                        # tx_signatures: [tip_sig, sell_sig_0, sell_sig_1, …]
+                        sig = (status.tx_signatures[i + 1]
+                               if len(status.tx_signatures) > i + 1 else None)
+                        round_results.append(SellResult(
+                            wallet=wallet,
+                            success=status.success and status.confirmed,
+                            signature=sig,
+                            error=(status.error
+                                   if not (status.success and status.confirmed) else None),
+                        ))
+
+            # ── Categorise round results ──────────────────────────────────────
+            round_confirmed   = [r for r in round_results if r.success]
+            round_hard_failed = [r for r in round_results
+                                 if not r.success
+                                 and "timeout" not in (r.error or "").lower()]
+            round_timed_out   = [r for r in round_results
+                                 if not r.success
+                                 and "timeout" in (r.error or "").lower()]
+
+            confirmed_results.extend(round_confirmed)
+            final_failed.extend(round_hard_failed)
+
+            if not round_timed_out or retry_num >= config.jito_max_retries:
+                # Done — either everything landed or we've exhausted retries
+                if round_timed_out:
+                    logger.warning(
+                        f"[JITO] {len(round_timed_out)} wallet(s) unconfirmed after "
+                        f"{config.jito_max_retries} retry attempt(s) — giving up"
+                    )
+                final_failed.extend(round_timed_out)
+                break
+
+            # ── Set up next retry (only timed-out wallets) ───────────────────
+            timed_out_pubkeys  = {str(r.wallet.public_key) for r in round_timed_out}
+            wallets_to_attempt = [r.wallet for r in round_timed_out]
+            # Retain only the signed pairs for wallets that timed out so that,
+            # if the blockhash is still fresh, we can reuse them.
+            signed_pairs = [(w, raw) for w, raw in signed_pairs
+                            if str(w.public_key) in timed_out_pubkeys]
+
+            next_tip_sol = scale_tip(tip_lamports, config.jito_tip_multiplier, max_tip_lam) / 1e9
+            logger.info(
+                f"[JITO] {len(round_timed_out)} wallet(s) timed out — "
+                f"retrying with tip {next_tip_sol:.4f} SOL…"
             )
 
-            for bid, wallets in bundle_wallet_map.items():
-                status = statuses.get(bid, BundleResult(bundle_id=bid, success=False,
-                                                        error="status unknown"))
-                for i, wallet in enumerate(wallets):
-                    # tx_signatures: [tip_sig, sell_sig_0, sell_sig_1, …]
-                    sig = (status.tx_signatures[i + 1]
-                           if len(status.tx_signatures) > i + 1 else None)
-                    sell_results.append(SellResult(
-                        wallet=wallet,
-                        success=status.success and status.confirmed,
-                        signature=sig,
-                        error=(status.error
-                               if not (status.success and status.confirmed) else None),
-                    ))
-
-        # ── 6. Phase 2 — SOL collection ───────────────────────────────────────
+        # ── Phase 2 — SOL collection ──────────────────────────────────────────
+        all_results     = confirmed_results + final_failed
         withdraw_result: Dict[str, Any] = {}
         if dev_wallet and fund_wallets:
             logger.info("[JITO] Phase 2 — collecting SOL → dev wallet…")
             withdraw_result = await self.withdraw_all_sol(fund_wallets, dev_wallet)
 
-        ok    = sum(1 for r in sell_results if r.success)
-        total = len(sell_results)
+        ok    = sum(1 for r in all_results if r.success)
+        total = len(all_results)
         logger.info(f"[JITO] Sell-all complete: {ok}/{total} confirmed")
 
         if ok > 0:
@@ -579,7 +678,7 @@ class TokenSeller:
             )
 
         return {
-            "wave1_results":   sell_results,
+            "wave1_results":   all_results,
             "wave2_results":   [],
             "withdraw_result": withdraw_result,
             "total":           total,

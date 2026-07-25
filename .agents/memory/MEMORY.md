@@ -1,1 +1,2 @@
 - [Wave sell & browser open](wave-sell-browser.md) — Phase 1/2 implementation details: which files were changed and the key design decisions.
+- [Jito MEV bundle implementation](jito-bundle-impl.md) — Options 3/4A/4B/4C: bundle limits, blockhash sharing, retry logic, endpoint auto-select, streaming callback, .env vars.

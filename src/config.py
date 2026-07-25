@@ -185,8 +185,15 @@ class Config:
         # none do.  Requires a tip payment per bundle.
         self.jito_enabled  = os.getenv("JITO_ENABLED",  "false").lower() == "true"
         self.jito_tip_sol  = self._float_env("JITO_TIP_SOL",  0.001)
-        # Regional block engine — one of: mainnet, amsterdam, ny, tokyo, frankfurt
+        # Regional block engine — one of: mainnet, amsterdam, ny, tokyo, frankfurt, auto
         self.jito_endpoint = os.getenv("JITO_ENDPOINT", "mainnet")
+
+        # ── 4A: Tip auto-scaling with retry ──────────────────────────────────
+        # On bundle timeout, retry up to jito_max_retries times, multiplying the
+        # tip by jito_tip_multiplier each attempt, capped at jito_max_tip_sol.
+        self.jito_max_retries     = self._int_env("JITO_MAX_RETRIES",     3)
+        self.jito_tip_multiplier  = self._float_env("JITO_TIP_MULTIPLIER", 2.0)
+        self.jito_max_tip_sol     = self._float_env("JITO_MAX_TIP_SOL",    0.05)
 
         # Two-wave sell: total wallet slots in wave 1 (dev wallet counts as 1).
         # Default 4 = dev + 3 fund wallets.  Remaining fund wallets fire in wave 2.
