@@ -964,11 +964,12 @@ class MonitorPane(Container):
     DEFAULT_CSS = """
     MonitorPane { layout: vertical; height: 1fr; padding: 0; }
     #mon-header {
-        height: 6; background: $surface; padding: 0 2;
+        height: 8; background: $surface; padding: 0 2;
         border-bottom: solid $border;
     }
-    #mon-price  { height: 2; text-style: bold; padding-top: 1; }
-    #mon-stats  { height: 2; color: $text-muted; }
+    #mon-price     { height: 2; text-style: bold; padding-top: 1; }
+    #mon-stats     { height: 2; color: $text-muted; }
+    #mon-ts-status { height: 2; }
     #mon-chart-box {
         height: 18; background: $background;
         border: solid cyan;
@@ -1007,6 +1008,7 @@ class MonitorPane(Container):
         with Container(id="mon-header"):
             yield Static("[dim]—[/dim]", id="mon-price")
             yield Static("[dim]awaiting feed…[/dim]", id="mon-stats")
+            yield Static("", id="mon-ts-status")
         with Container(id="mon-chart-box"):
             yield Static(
                 "[bold cyan]Price Chart[/bold cyan]  [dim]rolling 72 trades · auto-refresh[/dim]",
@@ -1208,6 +1210,12 @@ class MonitorPane(Container):
             "price": None, "price_open": None, "price_prev": None,
             "mcap": None, "volume": 0.0, "buys": 0, "sells": 0,
             "start": datetime.now(), "last_trade": None,
+            # reset trailing stop for new token
+            "ts_armed":      False,
+            "ts_high_water": None,
+            "ts_trail_pct":  config.trailing_stop_pct,
+            "ts_tightened":  False,
+            "ts_fired":      False,
         })
         self.query_one("#mon-table", DataTable).clear()
         self._ws_connect()
@@ -1219,6 +1227,12 @@ class MonitorPane(Container):
         "price": None, "price_open": None, "price_prev": None,
         "mcap": None, "volume": 0.0, "buys": 0, "sells": 0,
         "start": None, "last_trade": None,
+        # ── trailing stop ──────────────────────────────────────────────────
+        "ts_armed":      False,  # True once price crossed arm threshold
+        "ts_high_water": None,   # highest price seen since arming
+        "ts_trail_pct":  0.10,   # current trail distance (tightens on sell pressure)
+        "ts_tightened":  False,  # True once sell-pressure tightening fires
+        "ts_fired":      False,  # one-shot latch — prevents double-sell
     }
 
     @work(exclusive=True)
@@ -1282,6 +1296,7 @@ class MonitorPane(Container):
                 self._state["price_open"] = price
             self._state["price"] = price
             self._prices.append(price)
+            self._check_trailing_stop(price)
         if data.get("marketCapSol"):
             self._state["mcap"] = float(data["marketCapSol"])
         sol = float(data.get("solAmount", 0))
@@ -1298,6 +1313,84 @@ class MonitorPane(Container):
             "sig":  str(data.get("signature", "")),
             "time": datetime.now().strftime("%H:%M:%S"),
         })
+
+    def _check_trailing_stop(self, price: float) -> None:
+        """
+        Evaluate all trailing-stop conditions on every price tick.
+        Called only when a valid price has just been recorded in _prices.
+
+        Three independent mechanisms (all respect the ts_fired latch):
+          1. Wick detection  — fires regardless of arm state
+          2. Trailing stop   — requires arm threshold to be crossed first
+          3. Sell pressure   — tightens the trail in response to order flow
+        """
+        if not config.trailing_stop_enabled or self._state["ts_fired"]:
+            return
+
+        open_ = self._state["price_open"]
+        if not open_ or open_ <= 0:
+            return
+
+        # ── 1. Wick detection (active from the first trade, no arming needed) ─
+        # Fire immediately if price has dropped >= trailing_wick_pct from the
+        # recent high within the last trailing_wick_window price samples.
+        window = list(self._prices)[-(config.trailing_wick_window + 1):]
+        if len(window) >= 2:
+            recent_high = max(window[:-1])   # peak just before this tick
+            if recent_high > 0:
+                wick_drop = (recent_high - price) / recent_high
+                if wick_drop >= config.trailing_wick_pct:
+                    self._state["ts_fired"] = True
+                    self._trigger_auto_sell(
+                        f"wick −{wick_drop * 100:.1f}%  "
+                        f"in {len(window) - 1} trades"
+                    )
+                    return
+
+        # ── 2. Arm check ──────────────────────────────────────────────────────
+        if not self._state["ts_armed"]:
+            if price >= open_ * config.trailing_arm_multiplier:
+                self._state["ts_armed"]      = True
+                self._state["ts_high_water"] = price
+                self._state["ts_trail_pct"]  = config.trailing_stop_pct
+            return   # nothing more to evaluate until armed
+
+        # ── Update high-water mark ────────────────────────────────────────────
+        if price > self._state["ts_high_water"]:
+            self._state["ts_high_water"] = price
+
+        # ── 3. Sell-pressure tightening ───────────────────────────────────────
+        # Permanently tighten the trail once sell dominance threshold is hit.
+        if not self._state["ts_tightened"]:
+            recent = list(self._trades)[:config.trailing_sell_window]
+            if len(recent) >= config.trailing_sell_window:
+                sell_count = sum(1 for t in recent if t["type"] == "SELL")
+                if sell_count / len(recent) >= config.trailing_sell_ratio:
+                    self._state["ts_trail_pct"] = config.trailing_sell_pct
+                    self._state["ts_tightened"] = True
+
+        # ── Trail floor check ─────────────────────────────────────────────────
+        hw    = self._state["ts_high_water"]
+        trail = self._state["ts_trail_pct"]
+        floor = hw * (1.0 - trail)
+        if price < floor:
+            self._state["ts_fired"] = True
+            drop_pct = (hw - price) / hw * 100
+            tag = " [sell pressure]" if self._state["ts_tightened"] else ""
+            self._trigger_auto_sell(
+                f"trail{tag}: −{drop_pct:.1f}% from peak  "
+                f"(trail {trail * 100:.0f}%)"
+            )
+
+    def _trigger_auto_sell(self, reason: str) -> None:
+        """Notify the user and fire the sell worker non-interactively."""
+        self.notify(
+            f"Trigger: {reason}",
+            title="🎯 Trailing Stop Fired",
+            severity="warning",
+            timeout=12,
+        )
+        self._do_sell_all()
 
     def _update_ui(self, graph: bool = True) -> None:
         st    = self._state
@@ -1373,6 +1466,64 @@ class MonitorPane(Container):
             # Keep table trimmed to last 20 rows
             while tbl.row_count > 20:
                 tbl.remove_row(list(tbl.rows.keys())[0])
+
+        self._update_ts_ui()
+
+    def _update_ts_ui(self) -> None:
+        """Render the trailing-stop status bar in #mon-ts-status."""
+        try:
+            widget = self.query_one("#mon-ts-status", Static)
+        except Exception:
+            return
+
+        if not config.trailing_stop_enabled:
+            widget.update("")
+            return
+
+        st    = self._state
+        hw    = st["ts_high_water"]
+        trail = st["ts_trail_pct"]
+
+        if st["ts_fired"]:
+            widget.update("[bold red]🎯 TRAILING STOP  ●  SOLD[/bold red]")
+            return
+
+        if not st["ts_armed"]:
+            open_ = st["price_open"]
+            if open_:
+                arm_price = open_ * config.trailing_arm_multiplier
+                widget.update(
+                    f"[dim]🎯 Trailing  IDLE[/dim]  "
+                    f"[dim]arms at {_fmt_price(arm_price)} SOL  "
+                    f"({config.trailing_arm_multiplier:.2f}×open)  "
+                    f"trail {trail * 100:.0f}%  "
+                    f"wick {config.trailing_wick_pct * 100:.0f}%[/dim]"
+                )
+            else:
+                widget.update(
+                    "[dim]🎯 Trailing  IDLE  awaiting first trade…[/dim]"
+                )
+            return
+
+        # Armed — show live peak / floor / distance
+        price      = st["price"]
+        floor      = hw * (1.0 - trail)
+        tight_tag  = (
+            "  [bold red]⚡ SELL PRESSURE[/bold red]"
+            if st["ts_tightened"] else ""
+        )
+        from_peak = (
+            f"{(price - hw) / hw * 100:+.1f}% from peak"
+            if (price and hw and hw > 0) else ""
+        )
+        widget.update(
+            f"[bold green]🎯 ARMED[/bold green]  "
+            f"peak [cyan]{_fmt_price(hw)}[/cyan]  "
+            f"floor [yellow]{_fmt_price(floor)}[/yellow]  "
+            f"trail [bold]{trail * 100:.0f}%[/bold]"
+            + (f"  [dim]({from_peak})[/dim]" if from_peak else "")
+            + tight_tag
+        )
 
 
 class SellWithdrawPane(Container):

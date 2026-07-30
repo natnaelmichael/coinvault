@@ -140,6 +140,24 @@ class Config:
         self.auto_sell_mcap_threshold    = self._float_env("AUTO_SELL_MCAP_THRESHOLD",    100000.0)
         self.auto_withdraw_enabled = os.getenv("AUTO_WITHDRAW_ENABLED", "false").lower() == "true"
 
+        # ── Trailing stop ─────────────────────────────────────────────────────
+        # Arms when price >= open × trailing_arm_multiplier (1.0 = any profit).
+        # Sells when price drops trailing_stop_pct below its session peak (10%).
+        # Sell-pressure tightening: if ≥ trailing_sell_ratio of the last
+        #   trailing_sell_window trades are sells, trail narrows to
+        #   trailing_sell_pct (3%).  Once tightened it stays tight.
+        # Wick detection: immediate sell if price drops trailing_wick_pct
+        #   within the last trailing_wick_window trades (5% / 5 trades).
+        #   Active from the first trade — does not require arming.
+        self.trailing_stop_enabled   = os.getenv("TRAILING_STOP_ENABLED", "false").lower() == "true"
+        self.trailing_arm_multiplier = self._float_env("TRAILING_ARM_MULTIPLIER", 1.0)
+        self.trailing_stop_pct       = self._float_env("TRAILING_STOP_PCT",       0.10)
+        self.trailing_sell_pct       = self._float_env("TRAILING_SELL_PCT",       0.03)
+        self.trailing_sell_window    = self._int_env("TRAILING_SELL_WINDOW",      10)
+        self.trailing_sell_ratio     = self._float_env("TRAILING_SELL_RATIO",     0.70)
+        self.trailing_wick_pct       = self._float_env("TRAILING_WICK_PCT",       0.05)
+        self.trailing_wick_window    = self._int_env("TRAILING_WICK_WINDOW",      5)
+
         # Monitoring
         self.price_alert_threshold_percent = self._float_env("PRICE_ALERT_THRESHOLD_PERCENT", 10.0)
         self.volume_alert_threshold        = self._float_env("VOLUME_ALERT_THRESHOLD",         1000.0)
