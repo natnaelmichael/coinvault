@@ -1211,11 +1211,13 @@ class MonitorPane(Container):
             "mcap": None, "volume": 0.0, "buys": 0, "sells": 0,
             "start": datetime.now(), "last_trade": None,
             # reset trailing stop for new token
-            "ts_armed":      False,
-            "ts_high_water": None,
-            "ts_trail_pct":  config.trailing_stop_pct,
-            "ts_tightened":  False,
-            "ts_fired":      False,
+            "ts_armed":       False,
+            "ts_high_water":  None,
+            "ts_trail_pct":   config.trailing_stop_pct,
+            "ts_tightened":   False,
+            "ts_fired":       False,
+            "ts_last_hw_time": None,
+            "ts_mcap_peak":   None,
         })
         self.query_one("#mon-table", DataTable).clear()
         self._ws_connect()
@@ -1228,11 +1230,13 @@ class MonitorPane(Container):
         "mcap": None, "volume": 0.0, "buys": 0, "sells": 0,
         "start": None, "last_trade": None,
         # ── trailing stop ──────────────────────────────────────────────────
-        "ts_armed":      False,  # True once price crossed arm threshold
-        "ts_high_water": None,   # highest price seen since arming
-        "ts_trail_pct":  0.10,   # current trail distance (tightens on sell pressure)
-        "ts_tightened":  False,  # True once sell-pressure tightening fires
-        "ts_fired":      False,  # one-shot latch — prevents double-sell
+        "ts_armed":       False,  # True once price crossed arm threshold
+        "ts_high_water":  None,   # highest price seen since arming
+        "ts_trail_pct":   0.10,   # current trail distance (tightens on sell pressure)
+        "ts_tightened":   False,  # True once sell-pressure tightening fires
+        "ts_fired":       False,  # one-shot latch — prevents double-sell
+        "ts_last_hw_time": None,  # datetime of last new high-water (time-based exit)
+        "ts_mcap_peak":   None,   # highest MCap seen this session (ceiling check)
     }
 
     @work(exclusive=True)
@@ -1298,7 +1302,11 @@ class MonitorPane(Container):
             self._prices.append(price)
             self._check_trailing_stop(price)
         if data.get("marketCapSol"):
-            self._state["mcap"] = float(data["marketCapSol"])
+            mcap_val = float(data["marketCapSol"])
+            self._state["mcap"] = mcap_val
+            # Track session MCap peak for ceiling check
+            if self._state["ts_mcap_peak"] is None or mcap_val > self._state["ts_mcap_peak"]:
+                self._state["ts_mcap_peak"] = mcap_val
         sol = float(data.get("solAmount", 0))
         tok = float(data.get("tokenAmount", 0))
         is_buy = bool(data.get("isBuy", True))
@@ -1319,10 +1327,12 @@ class MonitorPane(Container):
         Evaluate all trailing-stop conditions on every price tick.
         Called only when a valid price has just been recorded in _prices.
 
-        Three independent mechanisms (all respect the ts_fired latch):
-          1. Wick detection  — fires regardless of arm state
-          2. Trailing stop   — requires arm threshold to be crossed first
-          3. Sell pressure   — tightens the trail in response to order flow
+        Five independent mechanisms (all respect the ts_fired latch):
+          1. MCap ceiling    — fires regardless of arm state
+          2. Wick detection  — fires regardless of arm state
+          3. Trailing stop   — requires arm threshold to be crossed first
+          4. Sell pressure   — tightens the trail in response to order flow
+          5. Time-based exit — sells outright if no new high for N seconds
         """
         if not config.trailing_stop_enabled or self._state["ts_fired"]:
             return
@@ -1331,7 +1341,24 @@ class MonitorPane(Container):
         if not open_ or open_ <= 0:
             return
 
-        # ── 1. Wick detection (active from the first trade, no arming needed) ─
+        now = datetime.now()
+
+        # ── 1. MCap ceiling (active from the first MCap reading, no arm needed) ─
+        # Sell outright if MCap has dropped >= trailing_mcap_drop_pct from its
+        # session peak.  Catches failed pumps even before the trail arms.
+        mcap      = self._state["mcap"]
+        mcap_peak = self._state["ts_mcap_peak"]
+        if mcap and mcap_peak and mcap_peak > 0:
+            mcap_drop = (mcap_peak - mcap) / mcap_peak
+            if mcap_drop >= config.trailing_mcap_drop_pct:
+                self._state["ts_fired"] = True
+                self._trigger_auto_sell(
+                    f"MCap −{mcap_drop * 100:.0f}% from peak  "
+                    f"({mcap:.1f} SOL ← peak {mcap_peak:.1f} SOL)"
+                )
+                return
+
+        # ── 2. Wick detection (active from the first trade, no arming needed) ─
         # Fire immediately if price has dropped >= trailing_wick_pct from the
         # recent high within the last trailing_wick_window price samples.
         window = list(self._prices)[-(config.trailing_wick_window + 1):]
@@ -1347,19 +1374,36 @@ class MonitorPane(Container):
                     )
                     return
 
-        # ── 2. Arm check ──────────────────────────────────────────────────────
+        # ── 3. Arm check ──────────────────────────────────────────────────────
         if not self._state["ts_armed"]:
             if price >= open_ * config.trailing_arm_multiplier:
-                self._state["ts_armed"]      = True
-                self._state["ts_high_water"] = price
-                self._state["ts_trail_pct"]  = config.trailing_stop_pct
+                self._state["ts_armed"]       = True
+                self._state["ts_high_water"]  = price
+                self._state["ts_trail_pct"]   = config.trailing_stop_pct
+                self._state["ts_last_hw_time"] = now
             return   # nothing more to evaluate until armed
 
         # ── Update high-water mark ────────────────────────────────────────────
         if price > self._state["ts_high_water"]:
-            self._state["ts_high_water"] = price
+            self._state["ts_high_water"]  = price
+            self._state["ts_last_hw_time"] = now   # reset the flat timer
 
-        # ── 3. Sell-pressure tightening ───────────────────────────────────────
+        # ── 4. Time-based exit ────────────────────────────────────────────────
+        # Sell outright if no new high-water has been set for
+        # trailing_max_flat_secs seconds — hype has faded.
+        last_hw = self._state["ts_last_hw_time"]
+        if last_hw is not None:
+            flat_secs = (now - last_hw).total_seconds()
+            if flat_secs >= config.trailing_max_flat_secs:
+                self._state["ts_fired"] = True
+                self._trigger_auto_sell(
+                    f"time exit: no new high for "
+                    f"{flat_secs / 60:.0f} min  "
+                    f"(limit {config.trailing_max_flat_secs // 60} min)"
+                )
+                return
+
+        # ── 5. Sell-pressure tightening ───────────────────────────────────────
         # Permanently tighten the trail once sell dominance threshold is hit.
         if not self._state["ts_tightened"]:
             recent = list(self._trades)[:config.trailing_sell_window]
@@ -1505,10 +1549,10 @@ class MonitorPane(Container):
                 )
             return
 
-        # Armed — show live peak / floor / distance
-        price      = st["price"]
-        floor      = hw * (1.0 - trail)
-        tight_tag  = (
+        # Armed — show live peak / floor / distance / time / mcap
+        price     = st["price"]
+        floor     = hw * (1.0 - trail)
+        tight_tag = (
             "  [bold red]⚡ SELL PRESSURE[/bold red]"
             if st["ts_tightened"] else ""
         )
@@ -1516,7 +1560,36 @@ class MonitorPane(Container):
             f"{(price - hw) / hw * 100:+.1f}% from peak"
             if (price and hw and hw > 0) else ""
         )
-        widget.update(
+
+        # Time-based exit countdown
+        last_hw = st["ts_last_hw_time"]
+        time_s  = ""
+        if last_hw is not None:
+            flat_secs  = (datetime.now() - last_hw).total_seconds()
+            limit_secs = config.trailing_max_flat_secs
+            remaining  = max(0, limit_secs - flat_secs)
+            elapsed_m  = int(flat_secs  // 60)
+            remain_m   = int(remaining  // 60)
+            remain_s   = int(remaining  %  60)
+            timer_col  = "red" if remaining < 120 else ("yellow" if remaining < 300 else "dim")
+            time_s = (
+                f"  [{timer_col}]⏱ {elapsed_m}m flat  "
+                f"exits in {remain_m}m{remain_s:02d}s[/{timer_col}]"
+            )
+
+        # MCap ceiling status
+        mcap      = st["mcap"]
+        mcap_peak = st["ts_mcap_peak"]
+        mcap_s    = ""
+        if mcap and mcap_peak and mcap_peak > 0:
+            mcap_drop = (mcap_peak - mcap) / mcap_peak * 100
+            drop_col  = "red" if mcap_drop >= 35 else ("yellow" if mcap_drop >= 20 else "dim")
+            mcap_s = (
+                f"  [{drop_col}]MCap {mcap:.1f} SOL  "
+                f"peak {mcap_peak:.1f}  (−{mcap_drop:.0f}%)[/{drop_col}]"
+            )
+
+        line1 = (
             f"[bold green]🎯 ARMED[/bold green]  "
             f"peak [cyan]{_fmt_price(hw)}[/cyan]  "
             f"floor [yellow]{_fmt_price(floor)}[/yellow]  "
@@ -1524,6 +1597,8 @@ class MonitorPane(Container):
             + (f"  [dim]({from_peak})[/dim]" if from_peak else "")
             + tight_tag
         )
+        line2 = time_s.strip() + mcap_s
+        widget.update(line1 + ("\n" + line2 if line2.strip() else ""))
 
 
 class SellWithdrawPane(Container):

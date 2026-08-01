@@ -157,6 +157,12 @@ class Config:
         self.trailing_sell_ratio     = self._float_env("TRAILING_SELL_RATIO",     0.70)
         self.trailing_wick_pct       = self._float_env("TRAILING_WICK_PCT",       0.05)
         self.trailing_wick_window    = self._int_env("TRAILING_WICK_WINDOW",      5)
+        # Time-based exit: sell outright if no new high-water is set for this
+        # many seconds after arming (default 900 = 15 min).
+        self.trailing_max_flat_secs  = self._int_env("TRAILING_MAX_FLAT_SECS",    900)
+        # MCap ceiling: sell outright if MCap drops >= this fraction from its
+        # session peak, regardless of trail state (default 0.50 = 50% drop).
+        self.trailing_mcap_drop_pct  = self._float_env("TRAILING_MCAP_DROP_PCT",  0.50)
 
         # Monitoring
         self.price_alert_threshold_percent = self._float_env("PRICE_ALERT_THRESHOLD_PERCENT", 10.0)
