@@ -239,8 +239,9 @@ class Config:
         if not self.fund_wallet_keys:
             errors.append("No FUND_WALLET_PRIVATE_KEYS configured (comma-separated keys in .env)")
 
-        if not self.pinata_jwt:
-            errors.append("PINATA_JWT is not set")
+        # PINATA_JWT is only required for token creation (uploading metadata to IPFS).
+        # It is intentionally NOT a hard startup error so that the TUI can start,
+        # show balances, and sell existing positions even without Pinata configured.
 
         if self.max_buy_amount_sol < self.min_buy_amount_sol:
             errors.append("MAX_BUY_AMOUNT_SOL must be >= MIN_BUY_AMOUNT_SOL")

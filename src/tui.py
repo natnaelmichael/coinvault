@@ -608,15 +608,15 @@ class BalancesPane(Container):
             tbl.add_row(
                 f"[bold]{w.label}[/bold]",
                 str(w.public_key),
-                f"[bold green]{w.balance_sol:.4f}[/bold green]",
+                f"[bold green]{w.balance_sol:.6f}[/bold green]",
             )
         for w in wallet_manager.fund_wallets:
-            tbl.add_row(w.label, str(w.public_key), f"{w.balance_sol:.4f}")
+            tbl.add_row(w.label, str(w.public_key), f"{w.balance_sol:.6f}")
         total = wallet_manager.get_total_balance()
         tbl.add_row(
             "[bold yellow]TOTAL[/bold yellow]",
             f"[dim]{len(wallet_manager.fund_wallets)} fund wallet(s)[/dim]",
-            f"[bold yellow]{total:.4f}[/bold yellow]",
+            f"[bold yellow]{total:.6f}[/bold yellow]",
         )
         self.query_one("#btn-bal-refresh", Button).disabled = False
 
@@ -653,7 +653,7 @@ class DistributePane(Container):
         nf = len(wallet_manager.fund_wallets)
         if dw:
             self.query_one("#dist-info", Static).update(
-                f"Dev balance: [cyan]{dw.balance_sol:.4f} SOL[/cyan]  |  "
+                f"Dev balance: [cyan]{dw.balance_sol:.6f} SOL[/cyan]  |  "
                 f"Fund wallets: [cyan]{nf}[/cyan]"
             )
         else:
@@ -2071,13 +2071,13 @@ class ManageWalletsPane(Container):
             tbl.add_row(
                 f"[bold]{w.label}[/bold]",
                 str(w.public_key),
-                f"[bold]{w.balance_sol:.4f}[/bold]",
+                f"[bold]{w.balance_sol:.6f}[/bold]",
                 "[cyan]Dev[/cyan]",
             )
         for w in wallet_manager.fund_wallets:
             tbl.add_row(
                 w.label, str(w.public_key),
-                f"{w.balance_sol:.4f}", "[dim]Fund[/dim]",
+                f"{w.balance_sol:.6f}", "[dim]Fund[/dim]",
             )
 
     @on(Button.Pressed, "#btn-wm-refresh")
