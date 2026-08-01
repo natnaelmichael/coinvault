@@ -126,8 +126,14 @@ class Config:
 
         # Wallets
         self.dev_wallet_key = os.getenv("DEV_WALLET_PRIVATE_KEY", "")
-        fund_keys_str = os.getenv("FUND_WALLET_PRIVATE_KEYS", "")# + os.getenv("FUND_WALLET_PRIVATE_KEYS2", "")
-        self.fund_wallet_keys = [k.strip() for k in fund_keys_str.split(",") if k.strip()]
+        # Keys may be split across up to three env vars to work around per-secret
+        # character limits.  All three are merged before parsing.
+        _raw_keys = ",".join(filter(None, [
+            os.getenv("FUND_WALLET_PRIVATE_KEYS",  ""),
+            os.getenv("FUND_WALLET_PRIVATE_KEYS2", ""),
+            os.getenv("FUND_WALLET_PRIVATE_KEYS3", ""),
+        ]))
+        self.fund_wallet_keys = [k.strip() for k in _raw_keys.split(",") if k.strip()]
 
         # Trading
         self.default_slippage_bps = self._int_env("DEFAULT_SLIPPAGE_BPS", 500)

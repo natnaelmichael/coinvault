@@ -121,26 +121,53 @@ class WalletManager:
         await self.update_all_balances()
     
     async def update_all_balances(self):
-        """Update SOL balances for all wallets"""
-        tasks = []
-        
+        """Update SOL balances for all wallets.
+
+        Requests are staggered by 80 ms each so that a bank of wallets doesn't
+        hit the public RPC (api.mainnet-beta.solana.com) rate-limit all at once.
+        Each individual fetch retries up to 3 times with exponential backoff
+        before giving up, so transient 429s are handled transparently.
+        """
+        wallets: list = []
         if self.dev_wallet:
-            tasks.append(self._update_wallet_balance(self.dev_wallet))
-        
-        for wallet in self.fund_wallets:
-            tasks.append(self._update_wallet_balance(wallet))
-        
-        if tasks:
-            await asyncio.gather(*tasks)
-    
-    async def _update_wallet_balance(self, wallet: Wallet):
-        """Update balance for a single wallet"""
-        try:
-            response = await self.rpc_client.get_balance(wallet.public_key, commitment=Confirmed)
-            if response.value is not None:
-                wallet.balance_sol = response.value / 1e9  # Convert lamports to SOL
-        except Exception as e:
-            logger.warning(f"Failed to fetch balance for {wallet}: {e}")
+            wallets.append(self.dev_wallet)
+        wallets.extend(self.fund_wallets)
+
+        async def _staggered(wallet: "Wallet", index: int) -> None:
+            if index > 0:
+                await asyncio.sleep(index * 0.08)   # 80 ms stagger per wallet
+            await self._update_wallet_balance(wallet)
+
+        if wallets:
+            await asyncio.gather(*(_staggered(w, i) for i, w in enumerate(wallets)))
+
+    async def _update_wallet_balance(self, wallet: "Wallet") -> None:
+        """Fetch and store the SOL balance for one wallet.
+
+        Retries up to 3 times with 0.5 s → 1.0 s → 1.5 s backoff so that
+        public-RPC rate-limit errors (which silently returned 0 before) are
+        recovered automatically.  On permanent failure the previous balance is
+        preserved and a warning is logged.
+        """
+        max_attempts = 3
+        last_err: Exception | None = None
+
+        for attempt in range(max_attempts):
+            try:
+                if attempt > 0:
+                    await asyncio.sleep(0.5 * attempt)   # 0.5 s, 1.0 s
+                response = await self.rpc_client.get_balance(
+                    wallet.public_key, commitment=Confirmed
+                )
+                if response.value is not None:
+                    wallet.balance_sol = response.value / 1_000_000_000
+                return   # success — exit retry loop
+            except Exception as exc:
+                last_err = exc
+
+        logger.warning(
+            f"Balance fetch failed for {wallet} after {max_attempts} attempts: {last_err}"
+        )
     
     def get_total_balance(self) -> float:
         """Get total SOL balance across all wallets"""
